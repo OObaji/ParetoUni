@@ -107,14 +107,14 @@
         summary::-webkit-details-marker { display: none; }
         summary { list-style: none; }
 
-        .timeline-item {
+        .timeline-item, .obtainable-item {
             opacity: 0;
         }
-        .timeline-item.visible {
+        .timeline-item.visible, .obtainable-item.visible {
             animation: fadeIn 0.5s ease-out forwards;
         }
         
-        .milestone-checkbox {
+        .custom-checkbox {
             appearance: none;
             background-color: transparent;
             width: 24px;
@@ -123,12 +123,13 @@
             border-radius: 6px;
             cursor: pointer;
             position: relative;
+            flex-shrink: 0;
         }
-        .milestone-checkbox:checked {
+        .custom-checkbox:checked {
             background-color: #0ea5e9;
             border-color: #0ea5e9;
         }
-        .milestone-checkbox:checked::after {
+        .custom-checkbox:checked::after {
             content: '✓';
             color: white;
             position: absolute;
@@ -138,7 +139,7 @@
             font-size: 16px;
             font-weight: bold;
         }
-        .milestone-content.completed {
+        .list-item-content.completed {
             text-decoration: line-through;
             color: #6b7280;
         }
@@ -163,6 +164,7 @@
             <li><a href="#assessments" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Assessments</a></li>
             <li><a href="#dissertation" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Dissertation</a></li>
             <li><a href="#milestones" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Milestones</a></li>
+            <li><a href="#obtainables" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Obtainables</a></li>
         </ul>
     </nav>
 
@@ -279,9 +281,24 @@
         <!-- Milestones Page -->
         <section id="milestones" class="page">
             <h2 class="text-3xl font-bold mb-8">Your Milestones</h2>
+            <div class="flex justify-end mb-6">
+                 <button id="add-milestone-btn" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-lg">+ Add New</button>
+            </div>
             <div id="milestones-container" class="relative border-l-2 border-sky-900 ml-4">
                 <!-- Milestones will be injected here by JavaScript -->
             </div>
+        </section>
+
+        <!-- Obtainables Page -->
+        <section id="obtainables" class="page">
+             <h2 class="text-3xl font-bold mb-8">Your Obtainables</h2>
+             <div class="space-y-4">
+                <div id="obtainable-list" class="space-y-4"></div>
+                <form id="add-obtainable-form" class="flex gap-4">
+                    <input type="text" id="new-obtainable-input" placeholder="Add a new goal..." class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-3 focus:border-sky-500 focus:ring-sky-500 outline-none">
+                    <button type="submit" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 px-4 rounded-lg">Add</button>
+                </form>
+             </div>
         </section>
 
     </main>
@@ -297,6 +314,19 @@
                 <div class="flex gap-4 pt-4">
                     <button type="button" id="cancel-assessment-btn" class="w-full futuristic-card font-semibold py-2 px-4 rounded-lg hover:bg-gray-700/50">Cancel</button>
                     <button type="submit" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-lg">Add Assessment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+     <div id="milestone-modal" class="modal fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+        <div class="modal-content futuristic-card p-8 rounded-2xl w-full max-w-md">
+            <h3 class="text-2xl font-bold mb-6">Add New Milestone</h3>
+            <form id="milestone-form" class="space-y-4">
+                <div><label for="milestone-title" class="block mb-1 text-sm font-medium text-gray-300">Title</label><input type="text" id="milestone-title" required class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-2 focus:border-sky-500 focus:ring-sky-500 outline-none"></div>
+                <div><label for="milestone-date" class="block mb-1 text-sm font-medium text-gray-300">Date</label><input type="date" id="milestone-date" required class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-2 focus:border-sky-500 focus:ring-sky-500 outline-none"></div>
+                <div class="flex gap-4 pt-4">
+                    <button type="button" id="cancel-milestone-btn" class="w-full futuristic-card font-semibold py-2 px-4 rounded-lg hover:bg-gray-700/50">Cancel</button>
+                    <button type="submit" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-lg">Add Milestone</button>
                 </div>
             </form>
         </div>
@@ -658,31 +688,22 @@
 
         // --- Milestones Page ---
         const milestonesContainer = document.getElementById('milestones-container');
+        const milestoneModal = document.getElementById('milestone-modal');
+        const milestoneForm = document.getElementById('milestone-form');
+
         const renderMilestones = () => {
             if (!milestonesContainer) return;
-            const milestones = [
-                { date: '2025-09-22', title: 'Start University' },
-                { date: '2025-10-03', title: 'Obtain Lecture Notes' },
-                { date: '2025-10-03', title: 'Choose Dissertation Topic & Supervisor' },
-                { date: '2025-10-05', title: 'Gather Dissertation Sources' },
-                { date: '2025-10-06', title: 'Gather Dissertation Info & Plan Execution' },
-                { date: '2025-10-12', title: 'Make a Start on Chapter One' },
-                { date: '2025-11-01', title: 'Send Ethics Form for Approval' },
-                { date: '2025-11-30', title: 'Complete Chapters 1 & 2 of Dissertation' },
-                { date: '2026-01-30', title: 'Complete Chapters 3 & 4' },
-                { date: '2026-02-28', title: 'Complete Chapter 5' },
-                { date: '2026-03-20', title: 'Complete Dissertation Reviews' },
-                { date: '2026-03-25', title: 'Submit Dissertation (Personal Goal)' },
-                { date: '2026-07-17', title: 'Graduation' },
-            ].sort((a,b) => new Date(a.date) - new Date(b.date));
+            let milestones = JSON.parse(localStorage.getItem('milestones')) || [
+                { date: '2025-09-22', title: 'Start University' }, { date: '2025-10-03', title: 'Obtain Lecture Notes' }, { date: '2025-10-03', title: 'Choose Dissertation Topic & Supervisor' }, { date: '2025-10-05', title: 'Gather Dissertation Sources' }, { date: '2025-10-06', title: 'Gather Dissertation Info & Plan Execution' }, { date: '2025-10-12', title: 'Make a Start on Chapter One' }, { date: '2025-11-01', title: 'Send Ethics Form for Approval' }, { date: '2025-11-30', title: 'Complete Chapters 1 & 2 of Dissertation' }, { date: '2026-01-30', title: 'Complete Chapters 3 & 4' }, { date: '2026-02-28', title: 'Complete Chapter 5' }, { date: '2026-03-20', title: 'Complete Dissertation Reviews' }, { date: '2026-03-25', title: 'Submit Dissertation (Personal Goal)' }, { date: '2026-07-17', title: 'Graduation' },
+            ];
+            milestones.sort((a,b) => new Date(a.date) - new Date(b.date));
+            localStorage.setItem('milestones', JSON.stringify(milestones));
             
             let completedMilestones = JSON.parse(localStorage.getItem('completedMilestones')) || [];
-
             milestonesContainer.innerHTML = '';
 
             milestones.forEach((milestone, index) => {
                 const milestoneDate = new Date(milestone.date);
-                const isPast = milestoneDate < new Date();
                 const isCompleted = completedMilestones.includes(index);
 
                 let iconSvg, ringColorClass = 'ring-gray-900', bgColorClass = 'bg-gray-700';
@@ -700,25 +721,20 @@
                 item.innerHTML = `
                     <span class="absolute flex items-center justify-center w-8 h-8 ${bgColorClass} rounded-full -left-4 ring-4 ${ringColorClass}">${iconSvg}</span>
                     <div class="futuristic-card p-6 rounded-xl flex items-center justify-between gap-4">
-                        <div class="milestone-content ${isCompleted ? 'completed' : ''}">
+                        <div class="list-item-content ${isCompleted ? 'completed' : ''}">
                             <h3 class="text-lg font-semibold text-white">${milestone.title}</h3>
                             <time class="block mb-2 text-sm font-normal leading-none">${milestoneDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</time>
                         </div>
-                        <input type="checkbox" class="milestone-checkbox flex-shrink-0" data-index="${index}" ${isCompleted ? 'checked' : ''}>
+                        <input type="checkbox" class="custom-checkbox flex-shrink-0" data-index="${index}" ${isCompleted ? 'checked' : ''}>
                     </div>`;
                 milestonesContainer.appendChild(item);
             });
+            
+            document.querySelectorAll('.timeline-item').forEach((item, index) => {
+                 setTimeout(() => item.classList.add('visible'), index * 100);
+            });
 
-            const milestoneObserver = new IntersectionObserver((entries) => {
-                entries.forEach((entry, index) => {
-                    if (entry.isIntersecting) {
-                        setTimeout(() => entry.target.classList.add('visible'), index * 100);
-                    }
-                });
-            }, { threshold: 0.1 });
-            document.querySelectorAll('#milestones .timeline-item').forEach(item => milestoneObserver.observe(item));
-
-            document.querySelectorAll('.milestone-checkbox').forEach(checkbox => {
+            document.querySelectorAll('.custom-checkbox').forEach(checkbox => {
                 checkbox.addEventListener('change', (e) => {
                     const index = parseInt(e.target.dataset.index);
                     if (e.target.checked) {
@@ -731,6 +747,65 @@
                 });
             });
         }
+        document.getElementById('add-milestone-btn').addEventListener('click', () => milestoneModal.classList.add('open'));
+        document.getElementById('cancel-milestone-btn').addEventListener('click', () => milestoneModal.classList.remove('open'));
+        milestoneForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            let milestones = JSON.parse(localStorage.getItem('milestones')) || [];
+            milestones.push({ title: milestoneForm['milestone-title'].value, date: milestoneForm['milestone-date'].value });
+            localStorage.setItem('milestones', JSON.stringify(milestones));
+            renderMilestones();
+            milestoneModal.classList.remove('open');
+            milestoneForm.reset();
+        });
+
+
+        // --- Obtainables Page ---
+        const obtainableList = document.getElementById('obtainable-list');
+        const addObtainableForm = document.getElementById('add-obtainable-form');
+
+        const renderObtainables = () => {
+             if (!obtainableList) return;
+             let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [
+                { text: "Achieve a First-Class Honours degree", completed: false },
+                { text: "Secure a graduate role before graduation", completed: false },
+                { text: "Complete and publish dissertation research", completed: false },
+             ];
+             localStorage.setItem('obtainables', JSON.stringify(obtainables));
+             obtainableList.innerHTML = '';
+             
+             obtainables.forEach((item, index) => {
+                const obtainableItem = document.createElement('div');
+                obtainableItem.className = 'obtainable-item futuristic-card p-4 rounded-lg flex items-center gap-4';
+                obtainableItem.innerHTML = `
+                    <input type="checkbox" class="custom-checkbox" data-index="${index}" ${item.completed ? 'checked' : ''}>
+                    <p class="list-item-content text-lg ${item.completed ? 'completed' : ''}">${item.text}</p>
+                `;
+                obtainableList.appendChild(obtainableItem);
+                setTimeout(() => obtainableItem.classList.add('visible'), index * 100);
+             });
+
+             document.querySelectorAll('#obtainable-list .custom-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    const index = parseInt(e.target.dataset.index);
+                    obtainables[index].completed = e.target.checked;
+                    localStorage.setItem('obtainables', JSON.stringify(obtainables));
+                    renderObtainables();
+                });
+             });
+        }
+        
+        addObtainableForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = document.getElementById('new-obtainable-input');
+            if (input.value.trim()) {
+                 let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [];
+                 obtainables.push({ text: input.value.trim(), completed: false });
+                 localStorage.setItem('obtainables', JSON.stringify(obtainables));
+                 renderObtainables();
+                 input.value = '';
+            }
+        });
 
 
         // Initial renders
@@ -741,6 +816,7 @@
         renderCalendar();
         renderAssessments();
         renderMilestones();
+        renderObtainables();
         handleNav('home');
     });
     </script>
