@@ -183,15 +183,8 @@
 
         <!-- Home Page -->
         <section id="home" class="page active">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
-                <div>
-                     <h1 class="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-cyan-300 mb-2">Welcome to your UniHub</h1>
-                     <p id="home-date" class="text-lg text-gray-400"></p>
-                </div>
-                <div id="weather-card" class="futuristic-card p-6 rounded-2xl flex items-center justify-center gap-6">
-                    <!-- Weather info is injected here -->
-                </div>
-            </div>
+            <h1 class="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-cyan-300 mb-4">Welcome to your UniHub</h1>
+            <p class="text-lg text-gray-400 max-w-3xl mb-12">Your central dashboard for staying organized and productive this semester.</p>
              
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
                 <div class="futuristic-card p-6 rounded-2xl"><h3 class="font-bold text-xl text-sky-400 mb-2">Quote of the Day</h3><p class="text-gray-300 italic">"The secret of getting ahead is getting started."</p><p class="text-right text-gray-400 mt-2">- Mark Twain</p></div>
@@ -323,6 +316,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         // --- DATA ---
         const weeklySchedule = [
+            // Semester 1
             { day: 1, start: "10:00", end: "11:00", name: "Internet of Things", code: "CSCORE2H001", type: "Lecture", location: "Unknown", lecturer: "N/A", semester: 1 },
             { day: 1, start: "11:00", end: "12:00", name: "Internet of Things", code: "CSCORE2H001", type: "Seminar", location: "Unknown", lecturer: "N/A", semester: 1 },
             { day: 1, start: "12:00", end: "13:00", name: "Internet of Things", code: "CSCORE2H001", type: "Seminar 2", location: "Unknown", lecturer: "N/A", semester: 1 },
@@ -335,9 +329,9 @@
             { day: 5, start: "15:00", end: "16:00", name: "Cybersecurity", code: "", type: "Seminar 1", location: "FML 311a", lecturer: "N/A", semester: 1 },
             { day: 5, start: "16:00", end: "17:00", name: "Cybersecurity", code: "", type: "Seminar 2", location: "FML 311a", lecturer: "N/A", semester: 1 },
             // Semester 2
-            { day: 2, start: "10:00", end: "11:00", name: "Mobile Development", code: "", type: "Lecture", location: "FML 014", lecturer: "Mark Greenwood", semester: 2 },
-            { day: 2, start: "11:00", end: "12:00", name: "Mobile Development", code: "", type: "Seminar 1", location: "FML 311A", lecturer: "Mark Greenwood", semester: 2 },
-            { day: 2, start: "12:00", end: "13:00", name: "Mobile Development", code: "", type: "Seminar 2", location: "FML 311A", lecturer: "Mark Greenwood", semester: 2 },
+            { day: 1, start: "10:00", end: "11:00", name: "Mobile Development", code: "", type: "Lecture", location: "FML 014", lecturer: "Mark Greenwood", semester: 2 },
+            { day: 1, start: "11:00", end: "12:00", name: "Mobile Development", code: "", type: "Seminar 1", location: "FML 311A", lecturer: "Mark Greenwood", semester: 2 },
+            { day: 1, start: "12:00", end: "13:00", name: "Mobile Development", code: "", type: "Seminar 2", location: "FML 311A", lecturer: "Mark Greenwood", semester: 2 },
             { day: 4, start: "10:00", end: "11:00", name: "Spatial Computing", code: "", type: "Lecture", location: "FML 311A", lecturer: "David Reid", semester: 2 },
             { day: 4, start: "11:00", end: "12:00", name: "Spatial Computing", code: "", type: "Seminar 1", location: "FML 311A", lecturer: "David Reid", semester: 2 },
             { day: 4, start: "12:00", end: "13:00", name: "Spatial Computing", code: "", type: "Seminar 2", location: "FML 311A", lecturer: "David Reid", semester: 2 },
@@ -752,5 +746,4 @@
     </script>
 </body>
 </html>
-
 
