@@ -164,6 +164,7 @@
             <li><a href="#assessments" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Assessments</a></li>
             <li><a href="#dissertation" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Dissertation</a></li>
             <li><a href="#milestones" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Milestones</a></li>
+            <li><a href="#goals" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Goals</a></li>
             <li><a href="#obtainables" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Obtainables</a></li>
         </ul>
     </nav>
@@ -289,13 +290,25 @@
             </div>
         </section>
 
+        <!-- Goals Page -->
+        <section id="goals" class="page">
+             <h2 class="text-3xl font-bold mb-8">Your Goals</h2>
+             <div class="space-y-4">
+                <div id="goal-list" class="space-y-4"></div>
+                <form id="add-goal-form" class="flex gap-4">
+                    <input type="text" id="new-goal-input" placeholder="Add a new goal..." class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-3 focus:border-sky-500 focus:ring-sky-500 outline-none">
+                    <button type="submit" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 px-4 rounded-lg">Add</button>
+                </form>
+             </div>
+        </section>
+        
         <!-- Obtainables Page -->
         <section id="obtainables" class="page">
              <h2 class="text-3xl font-bold mb-8">Your Obtainables</h2>
              <div class="space-y-4">
                 <div id="obtainable-list" class="space-y-4"></div>
                 <form id="add-obtainable-form" class="flex gap-4">
-                    <input type="text" id="new-obtainable-input" placeholder="Add a new goal..." class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-3 focus:border-sky-500 focus:ring-sky-500 outline-none">
+                    <input type="text" id="new-obtainable-input" placeholder="Add a new obtainable item..." class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-3 focus:border-sky-500 focus:ring-sky-500 outline-none">
                     <button type="submit" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 px-4 rounded-lg">Add</button>
                 </form>
              </div>
@@ -760,6 +773,53 @@
         });
 
 
+        // --- Goals Page ---
+        const goalList = document.getElementById('goal-list');
+        const addGoalForm = document.getElementById('add-goal-form');
+
+        const renderGoals = () => {
+             if (!goalList) return;
+             let goals = JSON.parse(localStorage.getItem('goals')) || [
+                { text: "Achieve a First-Class Honours degree", completed: false },
+                { text: "Secure a graduate role before graduation", completed: false },
+                { text: "Complete and publish dissertation research", completed: false },
+             ];
+             localStorage.setItem('goals', JSON.stringify(goals));
+             goalList.innerHTML = '';
+             
+             goals.forEach((item, index) => {
+                const goalItem = document.createElement('div');
+                goalItem.className = 'goal-item futuristic-card p-4 rounded-lg flex items-center gap-4';
+                goalItem.innerHTML = `
+                    <input type="checkbox" class="custom-checkbox" data-index="${index}" ${item.completed ? 'checked' : ''}>
+                    <p class="list-item-content text-lg ${item.completed ? 'completed' : ''}">${item.text}</p>
+                `;
+                goalList.appendChild(goalItem);
+                setTimeout(() => goalItem.classList.add('visible'), index * 100);
+             });
+
+             document.querySelectorAll('#goal-list .custom-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    const index = parseInt(e.target.dataset.index);
+                    goals[index].completed = e.target.checked;
+                    localStorage.setItem('goals', JSON.stringify(goals));
+                    renderGoals();
+                });
+             });
+        }
+        
+        addGoalForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = document.getElementById('new-goal-input');
+            if (input.value.trim()) {
+                 let goals = JSON.parse(localStorage.getItem('goals')) || [];
+                 goals.push({ text: input.value.trim(), completed: false });
+                 localStorage.setItem('goals', JSON.stringify(goals));
+                 renderGoals();
+                 input.value = '';
+            }
+        });
+
         // --- Obtainables Page ---
         const obtainableList = document.getElementById('obtainable-list');
         const addObtainableForm = document.getElementById('add-obtainable-form');
@@ -767,9 +827,9 @@
         const renderObtainables = () => {
              if (!obtainableList) return;
              let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [
-                { text: "Achieve a First-Class Honours degree", completed: false },
-                { text: "Secure a graduate role before graduation", completed: false },
-                { text: "Complete and publish dissertation research", completed: false },
+                { text: "Obtain all lecture notes for IoT", completed: false },
+                { text: "Download assessment brief for Machine Learning", completed: false },
+                { text: "Review seminar notes for Web Innovations", completed: false },
              ];
              localStorage.setItem('obtainables', JSON.stringify(obtainables));
              obtainableList.innerHTML = '';
@@ -816,6 +876,7 @@
         renderCalendar();
         renderAssessments();
         renderMilestones();
+        renderGoals();
         renderObtainables();
         handleNav('home');
     });
