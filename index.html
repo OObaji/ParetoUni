@@ -180,38 +180,60 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Initialize Firebase
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-        let currentUser = null;
-        
         // Globals for Module Scope
         window.milestones = [];
         window.goals = [];
         window.userAssessments = [];
+        
+        // Configuration Variables
+        let useLocalStorage = false;
+        let db, auth, appId;
+        let currentUser = null;
 
-        // Auth Logic
-        const initAuth = async () => {
-          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            await signInWithCustomToken(auth, __initial_auth_token);
-          } else {
-            await signInAnonymously(auth);
-          }
-        };
-        initAuth();
+        // Initialize Firebase with fallback
+        try {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                currentUser = user;
-                setupRealtimeListeners(user.uid);
+                // Auth Logic for Firebase
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                };
+                initAuth();
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUser = user;
+                        setupRealtimeListeners(user.uid);
+                    }
+                });
+            } else {
+                throw new Error("Firebase config not found");
             }
-        });
+        } catch (e) {
+            console.warn("Firebase not available, falling back to localStorage:", e);
+            useLocalStorage = true;
+            // Load from local storage immediately
+            window.milestones = JSON.parse(localStorage.getItem('milestones')) || [];
+            window.goals = JSON.parse(localStorage.getItem('goals')) || [];
+            window.userAssessments = JSON.parse(localStorage.getItem('userAssessments')) || [];
+            // Trigger initial render events
+            setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'milestones' } }));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'goals' } }));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'assessments' } }));
+            }, 500);
+        }
 
-        // Database Listeners
+        // Database Listeners (Only used if Firebase is active)
         function setupRealtimeListeners(userId) {
             // 1. Milestones
             const milestonesRef = collection(db, 'artifacts', appId, 'users', userId, 'milestones');
@@ -235,8 +257,16 @@
             }, (error) => console.error("Assessments error:", error));
         }
 
-        // Global DB Functions exposed to window for inline HTML handlers
+        // --- Global DB Functions with LocalStorage Fallback ---
+
         window.addMilestoneDB = async (title, date) => {
+            if (useLocalStorage) {
+                const newM = { id: 'local-' + Date.now(), title, date, completed: false };
+                window.milestones.push(newM);
+                localStorage.setItem('milestones', JSON.stringify(window.milestones));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'milestones' } }));
+                return;
+            }
             if(!currentUser) return;
             await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'milestones'), {
                 title, date, completed: false
@@ -244,6 +274,13 @@
         };
         
         window.toggleMilestoneDB = async (id, currentStatus) => {
+            if (useLocalStorage) {
+                const m = window.milestones.find(x => x.id === id);
+                if(m) m.completed = !currentStatus;
+                localStorage.setItem('milestones', JSON.stringify(window.milestones));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'milestones' } }));
+                return;
+            }
             if(!currentUser) return;
             await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'milestones', id), {
                 completed: !currentStatus
@@ -251,11 +288,24 @@
         };
 
         window.deleteMilestoneDB = async (id) => {
+            if (useLocalStorage) {
+                window.milestones = window.milestones.filter(x => x.id !== id);
+                localStorage.setItem('milestones', JSON.stringify(window.milestones));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'milestones' } }));
+                return;
+            }
             if(!currentUser) return;
             await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'milestones', id));
         };
 
         window.addGoalDB = async (text) => {
+            if (useLocalStorage) {
+                const newG = { id: 'local-' + Date.now(), text, completed: false };
+                window.goals.push(newG);
+                localStorage.setItem('goals', JSON.stringify(window.goals));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'goals' } }));
+                return;
+            }
             if(!currentUser) return;
             await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'goals'), {
                 text, completed: false
@@ -263,6 +313,13 @@
         };
 
         window.toggleGoalDB = async (id, currentStatus) => {
+             if (useLocalStorage) {
+                const g = window.goals.find(x => x.id === id);
+                if(g) g.completed = !currentStatus;
+                localStorage.setItem('goals', JSON.stringify(window.goals));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'goals' } }));
+                return;
+             }
              if(!currentUser) return;
              await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'goals', id), {
                 completed: !currentStatus
@@ -270,6 +327,13 @@
         };
 
         window.updateGoalDB = async (id, newText) => {
+            if (useLocalStorage) {
+                const g = window.goals.find(x => x.id === id);
+                if(g) g.text = newText;
+                localStorage.setItem('goals', JSON.stringify(window.goals));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'goals' } }));
+                return;
+            }
             if(!currentUser) return;
             await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'goals', id), {
                 text: newText
@@ -277,11 +341,24 @@
         };
 
         window.deleteGoalDB = async (id) => {
+            if (useLocalStorage) {
+                window.goals = window.goals.filter(x => x.id !== id);
+                localStorage.setItem('goals', JSON.stringify(window.goals));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'goals' } }));
+                return;
+            }
             if(!currentUser) return;
             await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'goals', id));
         };
 
         window.addUserAssessmentDB = async (title, deadline) => {
+             if (useLocalStorage) {
+                const newA = { id: 'local-' + Date.now(), title, deadline };
+                window.userAssessments.push(newA);
+                localStorage.setItem('userAssessments', JSON.stringify(window.userAssessments));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'assessments' } }));
+                return;
+             }
              if(!currentUser) return;
              await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'assessments'), {
                 title, deadline
@@ -1108,7 +1185,6 @@
 
         // NEW: Sync Assessments to Milestones
         window.syncAssessmentsToMilestones = async () => {
-            // Use local scope check for user, although window.addMilestoneDB checks too
             const btn = document.getElementById('sync-milestones-btn');
             const originalText = btn.innerHTML;
             btn.innerHTML = '<span class="animate-spin inline-block">↻</span> Syncing...';
