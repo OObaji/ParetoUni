@@ -19,6 +19,7 @@
             font-family: 'Inter', sans-serif;
             background-color: #030712;
             color: #f9fafb;
+            overflow-x: hidden;
         }
 
         #bg-canvas {
@@ -79,12 +80,16 @@
             background-color: rgba(31, 41, 55, 0.3);
             transition: all 0.2s ease;
             cursor: pointer;
+            min-height: 80px;
+            padding: 4px;
+            border: 1px solid rgba(55, 65, 81, 0.2);
         }
-        .calendar-day.other-month { color: #4b5563; cursor: default; }
-        .calendar-day.today { background-color: rgba(56, 189, 248, 0.2); border: 1px solid #38bdf8; }
+        .calendar-day.other-month { color: #4b5563; cursor: default; background: rgba(17, 24, 39, 0.8); }
+        .calendar-day.today { background-color: rgba(56, 189, 248, 0.1); border: 1px solid #38bdf8; }
         .calendar-day:not(.other-month):hover { background-color: rgba(55, 65, 81, 0.5); }
         
-        .event-bar { height: 6px; border-radius: 9999px; }
+        .event-dot { height: 6px; width: 6px; border-radius: 50%; display: inline-block; margin-right: 2px; }
+        
         .event-bar-lecture { background-color: #38bdf8; } /* Sky Blue */
         .event-bar-seminar { background-color: #a78bfa; } /* Violet */
         .event-bar-uni { background-color: #f59e0b; } /* Amber */
@@ -103,6 +108,16 @@
             transform: scale(0.9); transition: transform 0.3s;
         }
         .modal.open .modal-content { transform: scale(1); }
+        
+        /* Pulse animation for notification */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(14, 165, 233, 0); }
+            100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
+        }
+        .animate-pulse-ring {
+            animation: pulse-ring 2s infinite;
+        }
 
         summary::-webkit-details-marker { display: none; }
         summary { list-style: none; }
@@ -158,6 +173,122 @@
             }
         }
     </style>
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Initialize Firebase
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        let currentUser = null;
+        
+        // Globals for Module Scope
+        window.milestones = [];
+        window.goals = [];
+        window.userAssessments = [];
+
+        // Auth Logic
+        const initAuth = async () => {
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } else {
+            await signInAnonymously(auth);
+          }
+        };
+        initAuth();
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                setupRealtimeListeners(user.uid);
+            }
+        });
+
+        // Database Listeners
+        function setupRealtimeListeners(userId) {
+            // 1. Milestones
+            const milestonesRef = collection(db, 'artifacts', appId, 'users', userId, 'milestones');
+            onSnapshot(query(milestonesRef), (snapshot) => {
+                window.milestones = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'milestones' } }));
+            }, (error) => console.error("Milestones error:", error));
+
+            // 2. Goals
+            const goalsRef = collection(db, 'artifacts', appId, 'users', userId, 'goals');
+            onSnapshot(query(goalsRef), (snapshot) => {
+                window.goals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'goals' } }));
+            }, (error) => console.error("Goals error:", error));
+
+            // 3. User Assessments
+            const assessmentsRef = collection(db, 'artifacts', appId, 'users', userId, 'assessments');
+            onSnapshot(query(assessmentsRef), (snapshot) => {
+                window.userAssessments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { type: 'assessments' } }));
+            }, (error) => console.error("Assessments error:", error));
+        }
+
+        // Global DB Functions exposed to window for inline HTML handlers
+        window.addMilestoneDB = async (title, date) => {
+            if(!currentUser) return;
+            await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'milestones'), {
+                title, date, completed: false
+            });
+        };
+        
+        window.toggleMilestoneDB = async (id, currentStatus) => {
+            if(!currentUser) return;
+            await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'milestones', id), {
+                completed: !currentStatus
+            });
+        };
+
+        window.deleteMilestoneDB = async (id) => {
+            if(!currentUser) return;
+            await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'milestones', id));
+        };
+
+        window.addGoalDB = async (text) => {
+            if(!currentUser) return;
+            await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'goals'), {
+                text, completed: false
+            });
+        };
+
+        window.toggleGoalDB = async (id, currentStatus) => {
+             if(!currentUser) return;
+             await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'goals', id), {
+                completed: !currentStatus
+            });
+        };
+
+        window.updateGoalDB = async (id, newText) => {
+            if(!currentUser) return;
+            await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'goals', id), {
+                text: newText
+            });
+        };
+
+        window.deleteGoalDB = async (id) => {
+            if(!currentUser) return;
+            await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'goals', id));
+        };
+
+        window.addUserAssessmentDB = async (title, deadline) => {
+             if(!currentUser) return;
+             await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'assessments'), {
+                title, deadline
+            });
+        };
+
+    </script>
 </head>
 <body class="flex">
     
@@ -172,14 +303,14 @@
             <h1 class="text-xl font-bold">UniHub</h1>
         </div>
         <ul id="main-nav-links" class="space-y-2">
-            <li><a href="#home" class="nav-link active flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Home</a></li>
-            <li><a href="#schedule" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Schedule</a></li>
-            <li><a href="#calendar" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Academic Calendar</a></li>
-            <li><a href="#assessments" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Assessments</a></li>
-            <li><a href="#dissertation" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Dissertation</a></li>
-            <li><a href="#milestones" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Milestones</a></li>
-            <li><a href="#goals" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Goals</a></li>
-            <li><a href="#obtainables" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold">Obtainables</a></li>
+            <li><a href="#home" class="nav-link active flex items-center gap-3 py-2 px-3 rounded-lg font-semibold" data-page="home">Home</a></li>
+            <li><a href="#schedule" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold" data-page="schedule">Schedule</a></li>
+            <li><a href="#calendar" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold" data-page="calendar">Academic Calendar</a></li>
+            <li><a href="#assessments" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold" data-page="assessments">Assessments</a></li>
+            <li><a href="#focus-study" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold" data-page="focus-study">Focus Study</a></li>
+            <li><a href="#dissertation" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold" data-page="dissertation">Dissertation</a></li>
+            <li><a href="#milestones" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold" data-page="milestones">Milestones</a></li>
+            <li><a href="#goals" class="nav-link flex items-center gap-3 py-2 px-3 rounded-lg font-semibold" data-page="goals">Goals</a></li>
         </ul>
     </nav>
 
@@ -215,7 +346,6 @@
                  <div class="futuristic-card p-6 rounded-2xl flex items-center gap-4"><div class="p-2 bg-gray-700 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-sky-400"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div><div><h3 class="font-bold text-lg">Cyber Security</h3><p class="text-sm text-gray-400">CSCORE1H001</p></div></div>
                  <div class="futuristic-card p-6 rounded-2xl flex items-center gap-4"><div class="p-2 bg-gray-700 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-sky-400"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div><div><h3 class="font-bold text-lg">Mobile Development</h3><p class="text-sm text-gray-400">N/A</p></div></div>
                  <div class="futuristic-card p-6 rounded-2xl flex items-center gap-4"><div class="p-2 bg-gray-700 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-sky-400"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/><path d="M12 21a9 9 0 0 1-9-9"/><path d="M3 12a9 9 0 0 0 9 9"/></svg></div><div><h3 class="font-bold text-lg">Spatial Computing</h3><p class="text-sm text-gray-400">N/A</p></div></div>
-            </div>
         </section>
 
         <!-- Schedule Page -->
@@ -255,7 +385,72 @@
                 <button id="add-assessment-btn" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-lg">+ Add New</button>
             </div>
             <div id="assessment-list" class="grid grid-cols-1 md:grid-cols-2 gap-8"></div>
-            <p class="text-center text-gray-500 mt-8 text-sm">Note: New assessments are not saved permanently and will be lost on page refresh.</p>
+            <p class="text-center text-gray-500 mt-8 text-sm">Official assessments are locked. User assessments are permanent.</p>
+        </section>
+
+        <!-- Focus Study Page -->
+        <section id="focus-study" class="page">
+            <h2 class="text-3xl font-bold mb-8">Focus Study</h2>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Configuration & Timer Panel -->
+                <div class="lg:col-span-1 space-y-6">
+                    <!-- Config Card -->
+                    <div id="focus-config-card" class="futuristic-card p-6 rounded-2xl">
+                        <h3 class="text-xl font-bold text-sky-400 mb-4">Session Setup</h3>
+                        <form id="focus-form" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">Total Duration</label>
+                                <select id="focus-duration" class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-2 focus:border-sky-500 outline-none text-white">
+                                    <option value="60">1 Hour</option>
+                                    <option value="90">1.5 Hours</option>
+                                    <option value="120" selected>2 Hours</option>
+                                    <option value="180">3 Hours</option>
+                                    <option value="240">4 Hours</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">Strategy</label>
+                                <select id="focus-strategy" class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-2 focus:border-sky-500 outline-none text-white">
+                                    <option value="25-5">Pomodoro (25m Focus / 5m Break)</option>
+                                    <option value="50-10">Deep Work (50m Focus / 10m Break)</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-[0_0_15px_rgba(14,165,233,0.3)]">
+                                Generate Schedule
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Active Timer Card (Hidden initially) -->
+                    <div id="active-timer-card" class="hidden futuristic-card p-6 rounded-2xl text-center border-t-4 border-sky-500">
+                        <div class="mb-2">
+                            <span id="timer-status" class="inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-sky-900/50 text-sky-300">Ready</span>
+                        </div>
+                        <div id="main-timer-display" class="text-6xl font-extrabold text-white mb-4 font-mono">00:00</div>
+                        <p id="timer-label" class="text-gray-400 mb-6">Select a session to start</p>
+                        
+                        <div class="flex gap-3 justify-center">
+                            <button id="timer-toggle-btn" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg">Pause</button>
+                            <button id="timer-stop-btn" class="bg-red-900/50 hover:bg-red-900/80 text-red-200 font-bold py-2 px-6 rounded-lg">Stop</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Timeline Panel -->
+                <div class="lg:col-span-2">
+                    <div class="futuristic-card p-6 rounded-2xl h-full min-h-[400px]">
+                        <div class="flex justify-between items-center mb-6">
+                            <h3 class="text-xl font-bold">Your Session Timeline</h3>
+                            <span id="session-end-preview" class="text-sm text-gray-400"></span>
+                        </div>
+                        
+                        <div id="focus-timeline" class="space-y-0 relative pl-4 border-l-2 border-gray-700">
+                            <p class="text-gray-500 italic pl-4">Configure your session on the left to generate a study plan.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <!-- Dissertation Page -->
@@ -296,9 +491,34 @@
         <!-- Milestones Page -->
         <section id="milestones" class="page">
             <h2 class="text-3xl font-bold mb-8">Your Milestones</h2>
-            <div class="flex justify-end mb-6">
-                 <button id="add-milestone-btn" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-lg">+ Add New</button>
+            
+            <!-- Progress Bar Section -->
+            <div class="futuristic-card p-6 rounded-2xl mb-8">
+                <div class="flex justify-between items-end mb-2">
+                    <div>
+                        <h3 class="text-xl font-bold text-sky-400">Assessment Progress</h3>
+                        <p class="text-gray-400 text-sm">Track your completion of assessment milestones</p>
+                    </div>
+                    <div class="text-right">
+                        <span id="progress-percentage" class="text-3xl font-bold text-white">0%</span>
+                    </div>
+                </div>
+                <div class="w-full bg-gray-800 rounded-full h-4 overflow-hidden shadow-inner">
+                    <div id="progress-bar" class="bg-gradient-to-r from-sky-600 to-cyan-400 h-4 rounded-full transition-all duration-1000 ease-out" style="width: 0%"></div>
+                </div>
+                <p id="progress-text" class="text-right text-xs text-gray-500 mt-2">0/0 Completed</p>
             </div>
+
+            <div class="flex justify-end gap-3 mb-6">
+                 <button id="sync-milestones-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors" onclick="syncAssessmentsToMilestones()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+                    Sync from Assessments
+                 </button>
+                 <button id="add-milestone-btn" class="bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2">
+                    <span>+</span> Add Custom
+                 </button>
+            </div>
+            
             <div id="milestones-container" class="relative border-l-2 border-sky-900 ml-4">
                 <!-- Milestones will be injected here by JavaScript -->
             </div>
@@ -311,18 +531,6 @@
                 <div id="goal-list" class="space-y-4"></div>
                 <form id="add-goal-form" class="flex flex-col sm:flex-row gap-4">
                     <input type="text" id="new-goal-input" placeholder="Add a new goal..." class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-3 focus:border-sky-500 focus:ring-sky-500 outline-none">
-                    <button type="submit" class="w-full sm:w-auto bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 px-4 rounded-lg">Add</button>
-                </form>
-             </div>
-        </section>
-        
-        <!-- Obtainables Page -->
-        <section id="obtainables" class="page">
-             <h2 class="text-3xl font-bold mb-8">Your Obtainables</h2>
-             <div class="space-y-4">
-                <div id="obtainable-list" class="space-y-4"></div>
-                <form id="add-obtainable-form" class="flex flex-col sm:flex-row gap-4">
-                    <input type="text" id="new-obtainable-input" placeholder="Add a new obtainable item..." class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-3 focus:border-sky-500 focus:ring-sky-500 outline-none">
                     <button type="submit" class="w-full sm:w-auto bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 px-4 rounded-lg">Add</button>
                 </form>
              </div>
@@ -373,7 +581,7 @@
         <div class="modal-content futuristic-card p-8 rounded-2xl w-full max-w-md">
             <h3 class="text-2xl font-bold mb-6">Edit Goal</h3>
             <form id="goal-form" class="space-y-4">
-                <input type="hidden" id="goal-index">
+                <input type="hidden" id="goal-id">
                 <div>
                     <label for="goal-text" class="block mb-1 text-sm font-medium text-gray-300">Goal</label>
                     <input type="text" id="goal-text" required class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-2 focus:border-sky-500 focus:ring-sky-500 outline-none">
@@ -385,22 +593,25 @@
             </form>
         </div>
     </div>
-    <!-- Obtainable Edit Modal -->
-    <div id="obtainable-modal" class="modal fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-        <div class="modal-content futuristic-card p-8 rounded-2xl w-full max-w-md">
-            <h3 class="text-2xl font-bold mb-6">Edit Obtainable</h3>
-            <form id="obtainable-form" class="space-y-4">
-                <input type="hidden" id="obtainable-index">
-                <div>
-                    <label for="obtainable-text" class="block mb-1 text-sm font-medium text-gray-300">Obtainable Item</label>
-                    <input type="text" id="obtainable-text" required class="w-full bg-gray-900/50 border border-gray-600 rounded-lg p-2 focus:border-sky-500 focus:ring-sky-500 outline-none">
-                </div>
-                <div class="flex gap-4 pt-4">
-                    <button type="button" id="cancel-obtainable-btn" class="w-full futuristic-card font-semibold py-2 px-4 rounded-lg hover:bg-gray-700/50">Cancel</button>
-                    <button type="submit" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-2 px-4 rounded-lg">Save Changes</button>
-                </div>
-            </form>
+
+    <!-- Session Notification Modal -->
+    <div id="notification-modal" class="modal fixed inset-0 bg-gray-900/90 backdrop-blur-xl flex items-center justify-center p-4 z-[60]">
+        <div class="modal-content futuristic-card p-10 rounded-3xl w-full max-w-lg text-center border-2 shadow-[0_0_50px_rgba(0,0,0,0.5)] transform transition-all" id="notification-card">
+            <div id="notification-icon-container" class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 text-4xl shadow-lg animate-pulse-ring">
+                <span id="notification-icon"></span>
+            </div>
+            <h3 id="notification-title" class="text-4xl font-extrabold mb-4 tracking-tight"></h3>
+            <p id="notification-message" class="text-xl text-gray-300 mb-8 leading-relaxed"></p>
+            <button id="notification-dismiss-btn" class="w-full py-4 px-6 rounded-xl font-bold text-lg transition-transform hover:scale-105 active:scale-95 shadow-lg">
+                Let's Go
+            </button>
         </div>
+    </div>
+
+    <!-- Mini Floating Timer -->
+    <div id="mini-timer" class="fixed bottom-8 right-8 w-24 h-24 rounded-full flex flex-col items-center justify-center text-white font-bold shadow-2xl z-40 hidden transition-all duration-300 hover:scale-110 cursor-pointer border-4 border-white/20 backdrop-blur-md group">
+        <span id="mini-timer-label" class="text-[10px] uppercase tracking-wider opacity-80 group-hover:opacity-100 transition-opacity">Focus</span>
+        <span id="mini-timer-text" class="text-2xl font-mono tracking-tight drop-shadow-md">00:00</span>
     </div>
 
 
@@ -428,657 +639,914 @@
             { day: 4, start: "11:00", end: "12:00", name: "Spatial Computing", code: "", type: "Seminar 1", location: "FML 311A", lecturer: "David Reid", semester: 2 },
             { day: 4, start: "12:00", end: "13:00", name: "Spatial Computing", code: "", type: "Seminar 2", location: "FML 311A", lecturer: "David Reid", semester: 2 },
         ];
+        
         const academicCalendarEvents = [
-            { name: "Induction", start: "2025-09-22", end: "2025-09-26", type: "uni" },{ name: "Teaching Weeks", start: "2025-09-22", end: "2025-10-31", type: "uni" },{ name: "Reflective Week", start: "2025-11-03", end: "2025-11-07", type: "break" },{ name: "Teaching Weeks", start: "2025-11-10", end: "2025-12-19", type: "uni" },{ name: "Christmas Break", start: "2025-12-22", end: "2026-01-04", type: "break" },{ name: "Assessment Weeks", start: "2026-01-05", end: "2026-01-16", type: "uni" },{ name: "Induction Week (PGT)", start: "2026-01-12", end: "2026-01-16", type: "uni" },{ name: "Teaching Weeks", start: "2026-01-20", end: "2026-03-27", type: "uni" },{ name: "Easter Break", start: "2026-03-30", end: "2026-04-12", type: "break" },{ name: "Teaching Weeks", start: "2026-04-13", end: "2026-04-24", type: "uni" },{ name: "Assessment Week", start: "2026-04-27", end: "2026-05-01", type: "uni" },{ name: "Graduation Week", start: "2026-07-13", end: "2026-07-17", type: "graduation" },
+            { name: "Induction", start: "2025-09-22", end: "2025-09-26", type: "uni" },
+            { name: "Teaching Weeks", start: "2025-09-22", end: "2025-10-31", type: "uni" },
+            { name: "Reflective Week", start: "2025-11-03", end: "2025-11-07", type: "break" },
+            { name: "Teaching Weeks", start: "2025-11-10", end: "2025-12-19", type: "uni" },
+            { name: "Christmas Break", start: "2025-12-22", end: "2026-01-04", type: "break" },
+            { name: "Assessment Weeks", start: "2026-01-05", end: "2026-01-16", type: "uni" },
+            { name: "Induction Week (PGT)", start: "2026-01-12", end: "2026-01-16", type: "uni" },
+            { name: "Teaching Weeks", start: "2026-01-20", end: "2026-03-27", type: "uni" },
+            { name: "Easter Break", start: "2026-03-30", end: "2026-04-12", type: "break" },
+            { name: "Teaching Weeks", start: "2026-04-13", end: "2026-04-24", type: "uni" },
+            { name: "Assessment Week", start: "2026-04-27", end: "2026-05-01", type: "uni" },
+            { name: "Graduation Week", start: "2026-07-13", end: "2026-07-17", type: "graduation" },
         ];
-        
-        let assessments = [
-            { title: "Internet-of-Things (IoT)", deadline: "2025-12-17T23:59:00" },
-            { title: "Machine Learning Project Proposal", deadline: "2025-11-07T23:59:00" },
-            { title: "Machine Learning Final Project", deadline: "2026-01-16T23:59:00" },
-            { title: "Spatial Computing", deadline: "2026-05-01T23:59:00" },
-            { title: "Spatial Computing Portfolio", deadline: "2026-05-01T23:59:00" },
-            { title: "Computer and Information Security", deadline: "2026-01-16T23:59:00" },
-            { title: "Web Innovations Project", deadline: "2026-01-09T23:59:00" },
-            { title: "Mobile Development", deadline: "2026-05-01T23:59:00" },
-            { title: "Examination In Mobile Development", deadline: "2026-05-02T12:00:00" },
-            { title: "Dissertation", deadline: "2026-04-15T17:00:00" },
-            { title: "Knowledge Management Research", deadline: "2025-10-30T23:59:00" },
-            { title: "Citex", deadline: "2025-11-30T23:59:00" }
+
+        // Official, hardcoded assessments from University PDF
+        const officialAssessments = [
+            { title: "Machine Learning: Project Proposal", deadline: "2025-11-07T23:59:00", isOfficial: true },
+            { title: "Dissertation: Engagement Log 1", deadline: "2025-11-14T23:59:00", isOfficial: true },
+            { title: "Internet-of-Things: Group Presentation", deadline: "2025-12-15T23:59:00", isOfficial: true },
+            { title: "Internet-of-Things: Coursework", deadline: "2025-12-17T23:59:00", isOfficial: true },
+            { title: "Dissertation: Engagement Log 2", deadline: "2025-12-19T23:59:00", isOfficial: true },
+            { title: "Web Innovations: Coursework", deadline: "2026-01-09T23:59:00", isOfficial: true },
+            { title: "Cybersecurity: In-class Test", deadline: "2026-01-16T23:59:00", isOfficial: true },
+            { title: "Machine Learning: Coursework", deadline: "2026-01-16T23:59:00", isOfficial: true },
+            { title: "Dissertation: Engagement Log 3", deadline: "2026-02-27T23:59:00", isOfficial: true },
+            { title: "Dissertation: Engagement Log 4", deadline: "2026-04-08T23:59:00", isOfficial: true },
+            { title: "Dissertation: Final Submission", deadline: "2026-04-15T23:59:00", isOfficial: true },
+            { title: "Mobile Development: Coursework", deadline: "2026-05-01T23:59:00", isOfficial: true },
+            { title: "Spatial Computing: Coursework", deadline: "2026-05-01T23:59:00", isOfficial: true },
+            { title: "Spatial Computing: Portfolio", deadline: "2026-05-01T23:59:00", isOfficial: true }
         ];
-        
+
+        // --- GLOBAL VARIABLES ---
         let allLectures = [];
-
-        // --- FULL SCHEDULE GENERATION ---
-        function generateFullSchedule() {
-            const teachingPeriods = [
-                { start: new Date('2025-09-22'), end: new Date('2025-10-31'), semester: 1 },
-                { start: new Date('2025-11-10'), end: new Date('2025-12-19'), semester: 1 },
-                { start: new Date('2026-01-20'), end: new Date('2026-03-27'), semester: 2 },
-                { start: new Date('2026-04-13'), end: new Date('2026-04-24'), semester: 2 }
-            ];
-
-            teachingPeriods.forEach(period => {
-                for (let d = new Date(period.start); d <= period.end; d.setDate(d.getDate() + 1)) {
-                    const dayOfWeek = (d.getDay() === 0) ? 7 : d.getDay();
-                    const lecturesOnDay = weeklySchedule.filter(l => l.day === dayOfWeek && (l.semester === period.semester));
-
-                    lecturesOnDay.forEach(lecture => {
-                        allLectures.push({ ...lecture, date: new Date(d) });
-                    });
-                }
-            });
-        }
+        let currentDate = new Date();
+        const navLinks = document.querySelectorAll('.nav-link');
+        const pages = document.querySelectorAll('.page');
+        const mobileMenu = document.getElementById('mobile-menu');
+        const assessmentModal = document.getElementById('assessment-modal');
+        const milestoneModal = document.getElementById('milestone-modal');
+        const goalModal = document.getElementById('goal-modal');
+        const calendarModal = document.getElementById('calendar-modal');
         
-        // --- 3D BACKGROUND ---
-        let scene, camera, renderer, stars;
+        // Listen for DB updates
+        window.addEventListener('dataUpdated', (e) => {
+            if(e.detail.type === 'milestones') renderMilestones();
+            if(e.detail.type === 'goals') renderGoals();
+            if(e.detail.type === 'assessments') {
+                renderAssessments();
+                renderCalendar();
+            }
+        });
+
+        // --- LOGIC FUNCTIONS ---
+
         function init3DBackground() {
             const canvas = document.getElementById('bg-canvas');
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 1000);
-            camera.position.z = 1;
-            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-
-            const starGeo = new THREE.BufferGeometry();
-            const starVertices = [];
-            for(let i=0; i<10000; i++) {
-                const x = (Math.random() - 0.5) * 2000;
-                const y = (Math.random() - 0.5) * 2000;
-                const z = (Math.random() * -2000);
-                starVertices.push(x, y, z);
-            }
-            starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true });
             
-            let starMaterial = new THREE.PointsMaterial({ color: 0xaaaaaa, size: 0.7, transparent: true });
-            stars = new THREE.Points(starGeo, starMaterial);
-            scene.add(stars);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
 
-            window.addEventListener('resize', onWindowResize, false);
-            document.addEventListener('mousemove', onMouseMove, false);
+            // Particles
+            const particlesGeometry = new THREE.BufferGeometry();
+            const particlesCount = 700;
+            const posArray = new Float32Array(particlesCount * 3);
 
+            for(let i = 0; i < particlesCount * 3; i++) {
+                posArray[i] = (Math.random() - 0.5) * 15;
+            }
+
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const material = new THREE.PointsMaterial({
+                size: 0.02,
+                color: 0x0ea5e9,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            const particlesMesh = new THREE.Points(particlesGeometry, material);
+            scene.add(particlesMesh);
+
+            camera.position.z = 3;
+
+            // Mouse interaction
+            let mouseX = 0;
+            let mouseY = 0;
+
+            document.addEventListener('mousemove', (event) => {
+                mouseX = event.clientX / window.innerWidth - 0.5;
+                mouseY = event.clientY / window.innerHeight - 0.5;
+            });
+
+            const clock = new THREE.Clock();
+
+            function animate() {
+                requestAnimationFrame(animate);
+                const elapsedTime = clock.getElapsedTime();
+
+                particlesMesh.rotation.y = elapsedTime * 0.05;
+                particlesMesh.rotation.x = mouseY * 0.5;
+                particlesMesh.rotation.y += mouseX * 0.5;
+
+                renderer.render(scene, camera);
+            }
             animate();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
         }
 
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        let mouseX = 0, mouseY = 0;
-        function onMouseMove(event) {
-            mouseX = event.clientX - window.innerWidth / 2;
-            mouseY = event.clientY - window.innerHeight / 2;
-        }
-
-        function animate() {
-            camera.position.x += (mouseX * 0.00001 - camera.position.x) * 0.05;
-            camera.position.y += (-mouseY * 0.00001 - camera.position.y) * 0.05;
-            camera.lookAt(scene.position);
-            stars.rotation.y += 0.0001;
-            renderer.render(scene, camera);
-            requestAnimationFrame(animate);
-        }
-        
-        // --- NAVIGATION ---
-        const menuBtn = document.getElementById('menu-btn'), closeBtn = document.getElementById('close-btn'), mobileMenu = document.getElementById('mobile-menu');
-        const mainNavLinks = document.querySelectorAll('#main-nav-links a'), mobileNavLinksContainer = document.getElementById('mobile-nav-links');
-        const mobileTitle = document.getElementById('mobile-title'), pages = document.querySelectorAll('.page');
-        
-        mobileNavLinksContainer.innerHTML = document.getElementById('main-nav-links').innerHTML;
-
-        menuBtn.addEventListener('click', () => mobileMenu.classList.remove('-translate-x-full'));
-        closeBtn.addEventListener('click', () => mobileMenu.classList.add('-translate-x-full'));
-        
-        const handleNav = (targetId) => {
-            pages.forEach(p => p.classList.toggle('active', p.id === targetId));
-            const activeLink = document.querySelector(`a[href="#${targetId}"]`);
-            mobileTitle.textContent = activeLink.textContent;
-            document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.getAttribute('href') === `#${targetId}`));
-            mobileMenu.classList.add('-translate-x-full');
-            window.scrollTo(0, 0);
-        };
-        
-        document.querySelectorAll('.nav-link').forEach(l => l.addEventListener('click', (e) => { e.preventDefault(); handleNav(l.getAttribute('href').substring(1)); }));
-
-        // --- SCHEDULE PAGE ---
-        const todayDateEl = document.getElementById('today-date'), scheduleContainer = document.getElementById('schedule-container'), upcomingLectureCard = document.getElementById('upcoming-lecture-card');
-        
-        const renderSchedule = () => {
+        function renderSchedule() {
+            const container = document.getElementById('schedule-container');
+            const dateDisplay = document.getElementById('today-date');
+            const upcomingCard = document.getElementById('upcoming-lecture-card');
+            
             const now = new Date();
-            todayDateEl.textContent = now.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            dateDisplay.textContent = now.toLocaleDateString('en-GB', options);
             
-            const isSem2 = now >= new Date('2026-01-20');
-            const todaysLectures = weeklySchedule.filter(l => {
-                const dayOfWeek = (now.getDay() === 0) ? 7 : now.getDay();
-                const semesterCheck = isSem2 ? l.semester === 2 : l.semester === 1;
-                return l.day === dayOfWeek && semesterCheck;
-            }).sort((a,b) => a.start.localeCompare(b.start));
-            
-            scheduleContainer.innerHTML = '';
-            let currentOrNextLecture = null;
+            container.innerHTML = '';
+            upcomingCard.innerHTML = '';
 
-            todaysLectures.forEach(lecture => {
-                const [startH, startM] = lecture.start.split(':');
-                const [endH, endM] = lecture.end.split(':');
-                const startTime = new Date(now).setHours(startH, startM, 0, 0);
-                const endTime = new Date(now).setHours(endH, endM, 0, 0);
-                
-                let typeColorClass = lecture.type.toLowerCase().includes('seminar') ? 'text-violet-400' : 'text-sky-400';
+            const dayOfWeek = now.getDay(); // 0 is Sunday
+            const todaysClasses = weeklySchedule.filter(l => l.day === dayOfWeek).sort((a,b) => parseInt(a.start) - parseInt(b.start));
 
-                const card = document.createElement('div');
-                card.className = 'futuristic-card p-4 rounded-lg flex justify-between items-center';
-                let cardContent = `<div><h4 class="font-bold text-lg">${lecture.name} <span class="text-sm font-normal ${typeColorClass}">${lecture.type}</span></h4><p class="text-sm text-gray-400">${lecture.start} - ${lecture.end} | ${lecture.location}</p><p class="text-sm text-gray-500">${lecture.lecturer}</p></div>`;
-
-                if (now < startTime && !currentOrNextLecture) {
-                    currentOrNextLecture = { ...lecture, isUpcoming: true, startTime };
-                    cardContent += `<span class="text-sky-400 font-semibold text-sm">Upcoming</span>`;
-                } else if (now >= startTime && now < endTime) {
-                    currentOrNextLecture = { ...lecture, isCurrent: true, endTime };
-                    cardContent += `<span class="text-green-400 font-semibold text-sm">In Progress</span>`;
-                } else if (now >= endTime) {
-                    card.classList.add('opacity-50');
-                    cardContent += `<span class="text-gray-500 font-semibold text-sm">Finished</span>`;
-                }
-                card.innerHTML = cardContent;
-                scheduleContainer.appendChild(card);
-            });
-
-            if (todaysLectures.length === 0) scheduleContainer.innerHTML = `<div class="futuristic-card text-center p-8 rounded-lg"><p class="text-gray-300">No lectures scheduled for today. Enjoy your day!</p></div>`;
-
-            if (currentOrNextLecture) {
-                if (currentOrNextLecture.isCurrent) {
-                    upcomingLectureCard.innerHTML = `<div class="futuristic-card p-6 rounded-2xl bg-green-900/20 border-green-700/60"><h3 class="text-2xl font-bold text-green-300">In Progress!</h3><p class="text-lg text-gray-300">${currentOrNextLecture.name}</p><div class="text-4xl font-extrabold text-white mt-4" id="class-countdown"></div><p class="text-sm text-center font-normal text-gray-400">Time remaining</p></div>`;
-                    startClassCountdown(currentOrNextLecture.endTime);
-                } else if (currentOrNextLecture.isUpcoming) {
-                    upcomingLectureCard.innerHTML = `<div class="futuristic-card p-6 rounded-2xl bg-sky-900/20 border-sky-700/60"><h3 class="text-2xl font-bold text-sky-300">Upcoming</h3><p class="text-lg text-gray-300">${currentOrNextLecture.name} at ${currentOrNextLecture.start}</p><p class="text-sm text-gray-400">${currentOrNextLecture.location}</p></div>`;
-                }
-            } else { upcomingLectureCard.innerHTML = ``; }
-        };
-
-        let classCountdownInterval;
-        function startClassCountdown(endTime) {
-            clearInterval(classCountdownInterval);
-            const countdownEl = document.getElementById('class-countdown');
-            classCountdownInterval = setInterval(() => {
-                const distance = endTime - new Date().getTime();
-                if (distance < 0) { clearInterval(classCountdownInterval); countdownEl.textContent = "Finished!"; renderSchedule(); return; }
-                const h = Math.floor(distance / 36e5).toString().padStart(2, '0'), m = Math.floor(distance % 36e5 / 6e4).toString().padStart(2, '0'), s = Math.floor(distance % 6e4 / 1000).toString().padStart(2, '0');
-                countdownEl.textContent = `${h}:${m}:${s}`;
-            }, 1000);
-        }
-        
-        // --- ACADEMIC CALENDAR ---
-        const calendarTitleEl = document.getElementById('calendar-title'), calendarGridEl = document.getElementById('calendar-grid'), calendarModal = document.getElementById('calendar-modal');
-        let currentDate = new Date();
-        
-        const renderCalendar = () => {
-            calendarGridEl.innerHTML = '';
-            calendarTitleEl.textContent = currentDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-            
-            const month = currentDate.getMonth(), year = currentDate.getFullYear();
-            const firstDay = new Date(year, month, 1).getDay(), daysInMonth = new Date(year, month + 1, 0).getDate();
-            const dayOffset = (firstDay === 0) ? 6 : firstDay - 1;
-
-            for(let i=0; i<dayOffset; i++) calendarGridEl.innerHTML += `<div class="calendar-day other-month aspect-square"></div>`;
-
-            for(let day=1; day<=daysInMonth; day++) {
-                const cellDate = new Date(year, month, day);
-                cellDate.setHours(0,0,0,0);
-                
-                const lecturesOnDay = allLectures.filter(l => l.date.toDateString() === cellDate.toDateString());
-                const uniEventsOnDay = academicCalendarEvents.filter(e => {
-                    const start = new Date(e.start), end = new Date(e.end);
-                    start.setHours(0,0,0,0); end.setHours(23,59,59,999);
-                    return cellDate >= start && cellDate <= end;
-                });
-
-                let eventHtml = '';
-                if(lecturesOnDay.length > 0 || uniEventsOnDay.length > 0) {
-                     eventHtml += '<div class="flex flex-col gap-1 mt-1 p-1">';
-                     if(lecturesOnDay.some(l => l.type.toLowerCase().includes('lecture'))) eventHtml += `<div class="event-bar event-bar-lecture w-full"></div>`;
-                     if(lecturesOnDay.some(l => l.type.toLowerCase().includes('seminar'))) eventHtml += `<div class="event-bar event-bar-seminar w-full"></div>`;
-                     if(uniEventsOnDay.some(e => e.type === 'uni')) eventHtml += `<div class="event-bar event-bar-uni w-full"></div>`;
-                     if(uniEventsOnDay.some(e => e.type === 'break')) eventHtml += `<div class="event-bar event-bar-break w-full"></div>`;
-                     if(uniEventsOnDay.some(e => e.type === 'graduation')) eventHtml += `<div class="event-bar event-bar-graduation w-full"></div>`;
-                    eventHtml += '</div>';
-                }
-                
-                const dayCell = document.createElement('div');
-                dayCell.className = `calendar-day ${cellDate.toDateString() === new Date().toDateString() ? 'today' : ''} aspect-square p-2 text-center text-sm`;
-                dayCell.innerHTML = `<span class="font-semibold">${day}</span>${eventHtml}`;
-                dayCell.addEventListener('click', () => showDayDetails(cellDate, lecturesOnDay, uniEventsOnDay));
-                calendarGridEl.appendChild(dayCell);
+            if (todaysClasses.length === 0) {
+                container.innerHTML = `<div class="text-center text-gray-500 py-10">No classes scheduled for today. Enjoy your free time!</div>`;
+                return;
             }
-        };
 
-        const showDayDetails = (date, lectures, uniEvents) => {
-            document.getElementById('calendar-modal-title').textContent = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
-            const body = document.getElementById('calendar-modal-body');
-            body.innerHTML = '';
+            let nextClassFound = false;
 
-            if (lectures.length === 0 && uniEvents.length === 0) {
-                body.innerHTML = `<p class="text-gray-400">No events scheduled for this day.</p>`;
-            } else {
-                uniEvents.forEach(e => {
-                    let colorClass = 'text-amber-300';
-                    if (e.type === 'break') colorClass = 'text-green-300';
-                    if (e.type === 'graduation') colorClass = 'text-pink-300';
-                    body.innerHTML += `<div class="p-3 rounded-lg bg-gray-800/50"><h4 class="font-bold ${colorClass}">${e.name}</h4></div>`
-                });
-                lectures.sort((a,b) => a.start.localeCompare(b.start)).forEach(l => {
-                    let typeColorClass = l.type.toLowerCase().includes('seminar') ? 'text-violet-400' : 'text-sky-400';
-                    body.innerHTML += `<div class="p-3 rounded-lg bg-gray-800/50"><h4 class="font-bold">${l.name} <span class="text-sm font-normal ${typeColorClass}">${l.type}</span></h4><p class="text-sm text-gray-400">${l.start} - ${l.end} | ${l.location}</p><p class="text-sm text-gray-500">${l.lecturer}</p></div>`;
-                });
-            }
-            calendarModal.classList.add('open');
-        };
+            todaysClasses.forEach(lecture => {
+                const startTime = parseInt(lecture.start.split(':')[0]);
+                const endTime = parseInt(lecture.end.split(':')[0]);
+                const currentHour = now.getHours();
+                
+                let status = "upcoming";
+                let cardClass = "border-l-4 border-sky-500";
+                
+                if (currentHour >= startTime && currentHour < endTime) {
+                    status = "active";
+                    cardClass = "border-l-4 border-green-500 bg-gray-800 ring-1 ring-green-500";
+                } else if (currentHour >= endTime) {
+                    status = "past";
+                    cardClass = "border-l-4 border-gray-600 opacity-60";
+                }
 
-        document.getElementById('calendar-modal-close').addEventListener('click', () => calendarModal.classList.remove('open'));
-        document.getElementById('prev-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });
-        document.getElementById('next-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
-        
-        // --- ASSESSMENTS PAGE ---
-        const assessmentList = document.getElementById('assessment-list'), modal = document.getElementById('assessment-modal'), form = document.getElementById('assessment-form');
-
-        const renderAssessments = () => {
-            assessmentList.innerHTML = assessments.length === 0 ? `<div class="futuristic-card text-center p-8 rounded-lg"><p class="text-gray-300">No assessments added yet. Click "+ Add New" to get started.</p></div>` : '';
-            assessments.sort((a,b) => new Date(a.deadline) - new Date(b.deadline)).forEach((ass, i) => {
-                const card = document.createElement('div');
-                card.className = 'futuristic-card p-6 rounded-2xl flex items-center gap-6';
-                card.innerHTML = `
-                    <div class="relative w-24 h-24 flex-shrink-0">
-                        <svg class="w-full h-full" viewBox="0 0 100 100">
-                            <circle cx="50" cy="50" r="45" fill="transparent" stroke="#374151" stroke-width="8"/>
-                            <circle id="progress-ring-${i}" cx="50" cy="50" r="45" fill="transparent" stroke="#38bdf8" stroke-width="8" stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283" transform="rotate(-90 50 50)"/>
-                        </svg>
-                         <div id="ass-countdown-text-${i}" class="absolute inset-0 flex flex-col items-center justify-center text-center"></div>
+                // Render List Item
+                const div = document.createElement('div');
+                div.className = `futuristic-card p-4 rounded-xl flex items-center justify-between ${cardClass}`;
+                div.innerHTML = `
+                    <div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="font-bold text-lg text-white">${lecture.name}</span>
+                            <span class="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-300">${lecture.type}</span>
+                        </div>
+                        <div class="text-sm text-gray-400 flex gap-4">
+                            <span><span class="text-sky-400">Time:</span> ${lecture.start} - ${lecture.end}</span>
+                            <span><span class="text-sky-400">Loc:</span> ${lecture.location}</span>
+                        </div>
                     </div>
-                    <div class="flex-grow">
-                        <h3 class="text-xl font-bold">${ass.title}</h3>
-                        <p class="text-gray-400 text-sm">Due: ${new Date(ass.deadline).toLocaleString('en-GB')}</p>
-                    </div>`;
-                assessmentList.appendChild(card);
-                startAssessmentCountdown(i, ass.deadline);
-            });
-        };
+                `;
+                container.appendChild(div);
 
-        let assCountdownIntervals = {};
-        function startAssessmentCountdown(index, deadline) {
-            clearInterval(assCountdownIntervals[index]);
-            const ring = document.getElementById(`progress-ring-${index}`);
-            const text = document.getElementById(`ass-countdown-text-${index}`);
-            
-            const ninetyDaysInMs = 90 * 24 * 60 * 60 * 1000;
-            const circumference = 2 * Math.PI * 45; // 282.7
-
-            const update = () => {
-                const distance = new Date(deadline).getTime() - new Date().getTime();
-                if (distance < 0) {
-                    clearInterval(assCountdownIntervals[index]);
-                    text.innerHTML = `<span class="text-lg font-bold text-gray-500">Passed</span>`;
-                    ring.style.strokeDashoffset = 0;
-                    ring.style.stroke = '#4b5563'; // gray-600
-                    return;
-                }
-                const days = Math.floor(distance / 864e5);
-                const hours = Math.floor(distance % 864e5 / 36e5);
-
-                text.innerHTML = `<span class="text-2xl font-bold">${days}</span><span class="text-xs text-gray-400">days left</span>`;
-                
-                const percentLeft = Math.max(0, Math.min(1, distance / ninetyDaysInMs));
-                ring.style.strokeDashoffset = circumference * (1 - percentLeft);
-                
-                if(days <= 7) ring.style.stroke = '#ef4444'; // red-500
-                else if(days <= 30) ring.style.stroke = '#f59e0b'; // amber-500
-                else ring.style.stroke = '#38bdf8'; // sky-400
-            };
-            update();
-            assCountdownIntervals[index] = setInterval(update, 3600000); // update every hour
-        }
-
-        document.getElementById('add-assessment-btn').addEventListener('click', () => modal.classList.add('open'));
-        document.getElementById('cancel-assessment-btn').addEventListener('click', () => modal.classList.remove('open'));
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            assessments.push({ title: form.title.value, deadline: `${form['deadline-date'].value}T${form['deadline-time'].value}` });
-            renderAssessments();
-            modal.classList.remove('open');
-            form.reset();
-        });
-
-        // --- Milestones Page ---
-        const milestonesContainer = document.getElementById('milestones-container');
-        const milestoneModal = document.getElementById('milestone-modal');
-        const milestoneForm = document.getElementById('milestone-form');
-        const milestoneModalTitle = document.getElementById('milestone-modal-title');
-
-        function openMilestoneModalForEdit(index) {
-            let milestones = JSON.parse(localStorage.getItem('milestones')) || [];
-            const milestone = milestones[index];
-            if (!milestone) return;
-
-            milestoneModalTitle.textContent = "Edit Milestone";
-            milestoneForm['milestone-index'].value = index;
-            milestoneForm['milestone-title'].value = milestone.title;
-            milestoneForm['milestone-date'].value = milestone.date;
-            milestoneModal.classList.add('open');
-        }
-
-        function openMilestoneModalForAdd() {
-            milestoneModalTitle.textContent = "Add New Milestone";
-            milestoneForm.reset();
-            milestoneForm['milestone-index'].value = '';
-            milestoneModal.classList.add('open');
-        }
-
-        function deleteMilestone(index) {
-            let milestones = JSON.parse(localStorage.getItem('milestones')) || [];
-            milestones.splice(index, 1);
-            
-            let completedMilestones = JSON.parse(localStorage.getItem('completedMilestones')) || [];
-            const newCompleted = completedMilestones
-                .map(completedIndex => {
-                    if (completedIndex > index) return completedIndex - 1;
-                    if (completedIndex === index) return -1;
-                    return completedIndex;
-                })
-                .filter(completedIndex => completedIndex !== -1);
-            
-            localStorage.setItem('completedMilestones', JSON.stringify(newCompleted));
-            localStorage.setItem('milestones', JSON.stringify(milestones));
-            renderMilestones();
-        }
-
-        const renderMilestones = () => {
-            if (!milestonesContainer) return;
-            let milestones = JSON.parse(localStorage.getItem('milestones')) || [
-                { date: '2025-09-22', title: 'Start University' }, { date: '2025-10-03', title: 'Obtain Lecture Notes' }, { date: '2025-10-03', title: 'Choose Dissertation Topic & Supervisor' }, { date: '2025-10-05', title: 'Gather Dissertation Sources' }, { date: '2025-10-06', title: 'Gather Dissertation Info & Plan Execution' }, { date: '2025-10-12', title: 'Make a Start on Chapter One' }, { date: '2025-11-01', title: 'Send Ethics Form for Approval' }, { date: '2025-11-30', title: 'Complete Chapters 1 & 2 of Dissertation' }, { date: '2026-01-30', title: 'Complete Chapters 3 & 4' }, { date: '2026-02-28', title: 'Complete Chapter 5' }, { date: '2026-03-20', title: 'Complete Dissertation Reviews' }, { date: '2026-03-25', title: 'Submit Dissertation (Personal Goal)' }, { date: '2026-07-17', title: 'Graduation' },
-            ];
-            milestones.sort((a,b) => new Date(a.date) - new Date(b.date));
-            localStorage.setItem('milestones', JSON.stringify(milestones));
-            
-            let completedMilestones = JSON.parse(localStorage.getItem('completedMilestones')) || [];
-            milestonesContainer.innerHTML = '';
-
-            milestones.forEach((milestone, index) => {
-                const milestoneDate = new Date(milestone.date);
-                const isCompleted = completedMilestones.includes(index);
-
-                let iconSvg = isCompleted
-                    ? `<svg class="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>`
-                    : `<svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"></path></svg>`;
-
-                const item = document.createElement('div');
-                item.className = `timeline-item mb-10 ml-8`;
-                item.innerHTML = `
-                    <span class="absolute flex items-center justify-center w-8 h-8 ${isCompleted ? 'bg-green-900' : 'bg-gray-700'} rounded-full -left-4 ring-4 ${isCompleted ? 'ring-green-900/50' : 'ring-gray-900'}">${iconSvg}</span>
-                    <div class="futuristic-card p-6 rounded-xl flex items-center justify-between gap-4">
-                        <div class="list-item-content ${isCompleted ? 'completed' : ''}">
-                            <h3 class="text-lg font-semibold text-white">${milestone.title}</h3>
-                            <time class="block text-sm font-normal leading-none">${milestoneDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</time>
-                        </div>
-                        <div class="flex items-center gap-4 ml-auto">
-                            <div class="action-buttons flex gap-2">
-                                <button class="edit-milestone-btn p-1.5 rounded-md hover:bg-gray-600" data-index="${index}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-                                <button class="delete-milestone-btn p-1.5 rounded-md hover:bg-gray-600" data-index="${index}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
+                // Update Upcoming Card (First one that isn't past)
+                if (!nextClassFound && status !== "past") {
+                    nextClassFound = true;
+                    upcomingCard.innerHTML = `
+                        <div class="futuristic-card p-6 rounded-2xl bg-gradient-to-r from-sky-900/40 to-blue-900/40 border border-sky-500/30">
+                            <h3 class="text-sky-300 text-sm font-bold uppercase tracking-wider mb-2">${status === 'active' ? 'HAPPENING NOW' : 'UP NEXT'}</h3>
+                            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div>
+                                    <h2 class="text-2xl font-bold text-white mb-1">${lecture.name}</h2>
+                                    <p class="text-gray-300">${lecture.type} &bull; ${lecture.location}</p>
+                                </div>
+                                <div class="text-right">
+                                    <p class="text-3xl font-mono text-white">${lecture.start}</p>
+                                    <p class="text-sm text-gray-400">${lecture.end}</p>
+                                </div>
                             </div>
-                            <input type="checkbox" class="custom-checkbox flex-shrink-0" data-index="${index}" ${isCompleted ? 'checked' : ''}>
                         </div>
-                    </div>`;
-                milestonesContainer.appendChild(item);
-            });
-            
-            document.querySelectorAll('.timeline-item').forEach((item, index) => {
-                 setTimeout(() => item.classList.add('visible'), index * 100);
-            });
-
-            document.querySelectorAll('#milestones-container .custom-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', (e) => {
-                    const index = parseInt(e.target.dataset.index);
-                    if (e.target.checked) {
-                        if (!completedMilestones.includes(index)) completedMilestones.push(index);
-                    } else {
-                        completedMilestones = completedMilestones.filter(i => i !== index);
-                    }
-                    localStorage.setItem('completedMilestones', JSON.stringify(completedMilestones));
-                    renderMilestones();
-                });
-            });
-
-            document.querySelectorAll('.edit-milestone-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => openMilestoneModalForEdit(parseInt(e.currentTarget.dataset.index)));
-            });
-            document.querySelectorAll('.delete-milestone-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => deleteMilestone(parseInt(e.currentTarget.dataset.index)));
+                    `;
+                }
             });
         }
 
-        document.getElementById('add-milestone-btn').addEventListener('click', openMilestoneModalForAdd);
-        document.getElementById('cancel-milestone-btn').addEventListener('click', () => milestoneModal.classList.remove('open'));
-        
-        milestoneForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            let milestones = JSON.parse(localStorage.getItem('milestones')) || [];
-            const index = milestoneForm['milestone-index'].value;
-            const milestoneData = { 
-                title: milestoneForm['milestone-title'].value, 
-                date: milestoneForm['milestone-date'].value 
-            };
+        function renderCalendar() {
+            const grid = document.getElementById('calendar-grid');
+            const title = document.getElementById('calendar-title');
+            
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            
+            title.textContent = new Date(year, month, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+            grid.innerHTML = '';
 
-            if (index !== '') {
-                milestones[parseInt(index)] = milestoneData;
-            } else {
-                milestones.push(milestoneData);
+            // Combine assessments for calendar display
+            const allAssessments = [...officialAssessments, ...window.userAssessments];
+
+            // Header
+            const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            days.forEach(d => {
+                const header = document.createElement('div');
+                header.className = 'text-center text-sky-400 font-semibold text-sm py-2';
+                header.innerText = d;
+                grid.appendChild(header);
+            });
+
+            const firstDayOfMonth = new Date(year, month, 1);
+            let startingDay = firstDayOfMonth.getDay();
+            if (startingDay === 0) startingDay = 7; // Make Sunday 7
+
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const prevMonthDays = new Date(year, month, 0).getDate();
+
+            // Previous Month Fillers
+            for (let i = 1; i < startingDay; i++) {
+                const div = document.createElement('div');
+                div.className = 'calendar-day other-month p-2 text-sm';
+                div.innerText = prevMonthDays - startingDay + 1 + i;
+                grid.appendChild(div);
             }
 
-            localStorage.setItem('milestones', JSON.stringify(milestones));
-            renderMilestones();
-            milestoneModal.classList.remove('open');
-        });
+            // Current Month
+            for (let i = 1; i <= daysInMonth; i++) {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+                const div = document.createElement('div');
+                div.className = 'calendar-day p-2 text-sm relative';
+                
+                // Check if today
+                const today = new Date();
+                if (i === today.getDate() && month === today.getMonth() && year === today.getFullYear()) {
+                    div.classList.add('today');
+                }
 
+                div.innerHTML = `<span class="font-bold">${i}</span>`;
+                
+                // Add Events Dots
+                // 1. Check Assessments
+                const hasAssessment = allAssessments.some(a => a.deadline.startsWith(dateStr));
+                if (hasAssessment) {
+                    div.innerHTML += `<div class="mt-1 w-full h-1 bg-red-500 rounded-full"></div>`;
+                }
 
-        // --- Goals Page ---
-        const goalList = document.getElementById('goal-list');
-        const addGoalForm = document.getElementById('add-goal-form');
-        const goalModal = document.getElementById('goal-modal');
-        const goalForm = document.getElementById('goal-form');
+                // 2. Check Academic Calendar
+                const calEvent = academicCalendarEvents.find(e => dateStr >= e.start && dateStr <= e.end);
+                if (calEvent) {
+                    let colorClass = 'event-bar-uni';
+                    if (calEvent.name.includes('Break')) colorClass = 'event-bar-break';
+                    if (calEvent.name.includes('Graduation')) colorClass = 'event-bar-graduation';
+                    div.innerHTML += `<div class="mt-1 w-full h-1 ${colorClass} rounded-full" title="${calEvent.name}"></div>`;
+                }
 
-        function openGoalModalForEdit(index) {
-            let goals = JSON.parse(localStorage.getItem('goals')) || [];
-            const goal = goals[index];
-            if (!goal) return;
+                div.addEventListener('click', () => openCalendarModal(dateStr, hasAssessment, calEvent));
+                grid.appendChild(div);
+            }
+        }
 
-            goalForm['goal-index'].value = index;
-            goalForm['goal-text'].value = goal.text;
+        function openCalendarModal(dateStr, hasAssessment, calEvent) {
+            const modalTitle = document.getElementById('calendar-modal-title');
+            const modalBody = document.getElementById('calendar-modal-body');
+            const allAssessments = [...officialAssessments, ...window.userAssessments];
+            
+            modalTitle.innerText = new Date(dateStr).toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+            modalBody.innerHTML = '';
+
+            if (calEvent) {
+                modalBody.innerHTML += `<div class="p-3 bg-gray-800 rounded-lg border-l-4 border-sky-500 mb-2"><h4 class="font-bold">Academic Event</h4><p>${calEvent.name}</p></div>`;
+            }
+
+            if (hasAssessment) {
+                const daysAssessments = allAssessments.filter(a => a.deadline.startsWith(dateStr));
+                daysAssessments.forEach(a => {
+                    modalBody.innerHTML += `<div class="p-3 bg-red-900/30 rounded-lg border-l-4 border-red-500 mb-2"><h4 class="font-bold text-red-300">Assessment Deadline</h4><p>${a.title}</p><p class="text-sm text-gray-400">${a.deadline.split('T')[1].substr(0,5)}</p></div>`;
+                });
+            }
+
+            // Check for lectures
+            const dayOfWeek = new Date(dateStr).getDay();
+            const lectures = weeklySchedule.filter(l => l.day === dayOfWeek);
+            if (lectures.length > 0 && (!calEvent || calEvent.type === 'uni')) {
+                 modalBody.innerHTML += `<h4 class="font-bold mt-4 mb-2">Classes</h4>`;
+                 lectures.forEach(l => {
+                     modalBody.innerHTML += `<div class="p-2 border-b border-gray-700 last:border-0"><div class="flex justify-between"><span class="font-bold">${l.name}</span><span class="text-xs bg-gray-700 px-2 rounded">${l.type}</span></div><div class="text-sm text-gray-400">${l.start} - ${l.end} | ${l.location}</div></div>`;
+                 });
+            } else if (lectures.length === 0) {
+                modalBody.innerHTML += `<p class="text-gray-500 italic mt-4">No classes scheduled.</p>`;
+            }
+
+            calendarModal.classList.add('open');
+        }
+
+        function renderAssessments() {
+            const list = document.getElementById('assessment-list');
+            list.innerHTML = '';
+            
+            const allAssessments = [...officialAssessments, ...window.userAssessments];
+
+            // Sort by date
+            allAssessments.sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+
+            allAssessments.forEach(a => {
+                const date = new Date(a.deadline);
+                const now = new Date();
+                const diffTime = date - now;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                
+                let timeClass = "text-gray-400";
+                let urgencyText = `${diffDays} days left`;
+                let borderClass = "border-gray-700";
+
+                if (diffDays < 0) {
+                    urgencyText = "Past Due";
+                    timeClass = "text-red-700";
+                } else if (diffDays <= 7) {
+                    timeClass = "text-red-400 font-bold";
+                    borderClass = "border-red-500";
+                } else if (diffDays <= 30) {
+                    timeClass = "text-orange-400";
+                    borderClass = "border-orange-500";
+                }
+                
+                // User added styling hint
+                const userTag = a.isOfficial ? '' : '<span class="text-xs bg-sky-900 text-sky-300 px-2 py-0.5 rounded ml-2">Custom</span>';
+
+                const div = document.createElement('div');
+                div.className = `futuristic-card p-6 rounded-xl border-l-4 ${borderClass}`;
+                div.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="flex items-center">
+                            <h3 class="font-bold text-xl">${a.title}</h3>
+                            ${userTag}
+                        </div>
+                        <span class="text-sm ${timeClass}">${urgencyText}</span>
+                    </div>
+                    <p class="text-gray-400 text-sm mb-4">Due: ${date.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short', year:'numeric'})} at ${date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</p>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        function renderMilestones() {
+            const container = document.getElementById('milestones-container');
+            const progressBar = document.getElementById('progress-bar');
+            const progressPercentage = document.getElementById('progress-percentage');
+            const progressText = document.getElementById('progress-text');
+            
+            container.innerHTML = '';
+
+            window.milestones.sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // Calculate Progress
+            const total = window.milestones.length;
+            const completed = window.milestones.filter(m => m.completed).length;
+            const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
+            
+            // Update Progress UI
+            progressBar.style.width = `${percent}%`;
+            progressPercentage.textContent = `${percent}%`;
+            progressText.textContent = `${completed}/${total} Completed`;
+
+            // Change color based on completion
+            if (percent === 100) {
+                progressBar.className = "bg-gradient-to-r from-green-500 to-emerald-400 h-4 rounded-full transition-all duration-1000 ease-out";
+                progressPercentage.classList.add('text-green-400');
+            } else {
+                progressBar.className = "bg-gradient-to-r from-sky-600 to-cyan-400 h-4 rounded-full transition-all duration-1000 ease-out";
+                progressPercentage.classList.remove('text-green-400');
+            }
+
+            if (total === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 text-gray-500 bg-gray-900/30 rounded-xl border border-dashed border-gray-700">
+                        <p class="mb-4">No milestones tracked yet.</p>
+                        <button class="text-sky-400 hover:text-sky-300 underline" onclick="syncAssessmentsToMilestones()">Sync your assessments</button> to get started.
+                    </div>
+                `;
+                return;
+            }
+
+            window.milestones.forEach((m) => {
+                const div = document.createElement('div');
+                div.className = `timeline-item mb-8 relative pl-6 visible`;
+                
+                const dotClass = m.completed ? 'bg-sky-500 shadow-[0_0_10px_rgba(14,165,233,0.5)]' : 'bg-gray-700';
+                const opacityClass = m.completed ? 'opacity-75' : 'opacity-100';
+                
+                div.innerHTML = `
+                    <span class="absolute left-[-9px] top-1 w-4 h-4 rounded-full ${dotClass} border-2 border-gray-900 transition-colors duration-300"></span>
+                    <div class="futuristic-card p-4 rounded-xl flex justify-between items-center group transition-all duration-300 ${m.completed ? 'border-sky-500/30' : ''}">
+                        <div class="${opacityClass}">
+                            <h4 class="font-bold text-lg ${m.completed ? 'line-through text-gray-500' : 'text-white'} transition-all">${m.title}</h4>
+                            <p class="text-sm text-gray-400">${new Date(m.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                        </div>
+                        <div class="action-buttons flex gap-2">
+                            <button class="p-2 rounded-lg ${m.completed ? 'bg-gray-700 text-gray-300' : 'bg-sky-600 text-white hover:bg-sky-500'} font-bold text-sm transition-colors" onclick="toggleMilestoneDB('${m.id}', ${m.completed})">
+                                ${m.completed ? 'Undo' : 'Check'}
+                            </button>
+                            <button class="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg transition-colors" onclick="deleteMilestoneDB('${m.id}')">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function renderGoals() {
+            const list = document.getElementById('goal-list');
+            list.innerHTML = '';
+            
+            if (window.goals.length === 0) {
+                list.innerHTML = '<div class="text-center text-gray-500 py-4 italic">No goals yet. Add one to get started!</div>';
+                return;
+            }
+
+            window.goals.forEach((g) => {
+                const div = document.createElement('div');
+                div.className = 'list-item visible futuristic-card p-4 rounded-xl flex items-center gap-4 group';
+                div.innerHTML = `
+                    <input type="checkbox" class="custom-checkbox" ${g.completed ? 'checked' : ''} onchange="toggleGoalDB('${g.id}', ${g.completed})">
+                    <div class="flex-1 list-item-content ${g.completed ? 'completed' : ''}">${g.text}</div>
+                    <div class="action-buttons flex gap-2">
+                        <button class="text-gray-400 hover:text-white" onclick="openGoalEdit('${g.id}', '${g.text.replace(/'/g, "\\'")}')"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
+                        <button class="text-red-400 hover:text-red-300" onclick="deleteGoalDB('${g.id}')"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        function handleNav(pageId) {
+            // Hide all pages
+            pages.forEach(p => p.classList.remove('active'));
+            // Show target
+            document.getElementById(pageId).classList.add('active');
+            
+            // Update links
+            navLinks.forEach(l => {
+                if(l.getAttribute('data-page') === pageId || l.getAttribute('href') === `#${pageId}`) {
+                    l.classList.add('active');
+                } else {
+                    l.classList.remove('active');
+                }
+            });
+
+            // Close mobile menu if open
+            mobileMenu.classList.add('-translate-x-full');
+        }
+
+        // --- GLOBAL ACTIONS (Exposed to window for inline HTML onclicks) ---
+        window.openGoalEdit = (id, text) => {
+            document.getElementById('goal-id').value = id;
+            document.getElementById('goal-text').value = text;
             goalModal.classList.add('open');
         }
 
-        function deleteGoal(index) {
-            let goals = JSON.parse(localStorage.getItem('goals')) || [];
-            goals.splice(index, 1);
-            localStorage.setItem('goals', JSON.stringify(goals));
-            renderGoals();
-        }
+        // NEW: Sync Assessments to Milestones
+        window.syncAssessmentsToMilestones = async () => {
+            // Use local scope check for user, although window.addMilestoneDB checks too
+            const btn = document.getElementById('sync-milestones-btn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span class="animate-spin inline-block">↻</span> Syncing...';
+            btn.disabled = true;
 
-        const renderGoals = () => {
-             if (!goalList) return;
-             let goals = JSON.parse(localStorage.getItem('goals')) || [
-                { text: "Achieve a First-Class Honours degree", completed: false },
-                { text: "Secure a graduate role before graduation", completed: false },
-                { text: "Complete and publish dissertation research", completed: false },
-             ];
-             localStorage.setItem('goals', JSON.stringify(goals));
-             goalList.innerHTML = '';
-             
-             goals.forEach((item, index) => {
-                const goalItem = document.createElement('div');
-                goalItem.className = 'goal-item list-item futuristic-card p-4 rounded-lg flex items-center gap-4';
-                goalItem.innerHTML = `
-                    <input type="checkbox" class="custom-checkbox" data-index="${index}" ${item.completed ? 'checked' : ''}>
-                    <p class="list-item-content text-lg flex-grow ${item.completed ? 'completed' : ''}">${item.text}</p>
-                    <div class="action-buttons flex gap-2">
-                        <button class="edit-goal-btn p-1.5 rounded-md hover:bg-gray-600" data-index="${index}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-                        <button class="delete-goal-btn p-1.5 rounded-md hover:bg-gray-600" data-index="${index}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
-                    </div>
-                `;
-                goalList.appendChild(goalItem);
-                setTimeout(() => goalItem.classList.add('visible'), index * 100);
-             });
+            try {
+                // Get existing titles to prevent duplicates
+                const existingTitles = new Set(window.milestones.map(m => m.title));
+                let count = 0;
 
-             document.querySelectorAll('#goal-list .custom-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', (e) => {
-                    let goals = JSON.parse(localStorage.getItem('goals')) || [];
-                    const index = parseInt(e.target.dataset.index);
-                    goals[index].completed = e.target.checked;
-                    localStorage.setItem('goals', JSON.stringify(goals));
-                    renderGoals();
-                });
-             });
-             document.querySelectorAll('#goal-list .edit-goal-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => openGoalModalForEdit(parseInt(e.currentTarget.dataset.index)));
-             });
-             document.querySelectorAll('#goal-list .delete-goal-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => deleteGoal(parseInt(e.currentTarget.dataset.index)));
-             });
-        }
-        
-        addGoalForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const input = document.getElementById('new-goal-input');
-            if (input.value.trim()) {
-                 let goals = JSON.parse(localStorage.getItem('goals')) || [];
-                 goals.push({ text: input.value.trim(), completed: false });
-                 localStorage.setItem('goals', JSON.stringify(goals));
-                 renderGoals();
-                 input.value = '';
+                // 1. Sync Official Assessments
+                for (const assessment of officialAssessments) {
+                    const milestoneTitle = `Submit: ${assessment.title}`;
+                    if (!existingTitles.has(milestoneTitle)) {
+                        const dateStr = assessment.deadline.split('T')[0];
+                        await window.addMilestoneDB(milestoneTitle, dateStr);
+                        count++;
+                    }
+                }
+
+                // 2. Sync User Assessments
+                for (const assessment of window.userAssessments) {
+                    const milestoneTitle = `Submit: ${assessment.title}`;
+                    if (!existingTitles.has(milestoneTitle)) {
+                        const dateStr = assessment.deadline.split('T')[0];
+                        await window.addMilestoneDB(milestoneTitle, dateStr);
+                        count++;
+                    }
+                }
+                
+            } catch (error) {
+                console.error("Sync error:", error);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
             }
+        };
+
+        // --- EVENT LISTENERS ---
+        
+        // Navigation
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const target = link.getAttribute('data-page') || link.getAttribute('href').substring(1);
+                handleNav(target);
+            });
         });
 
-        document.getElementById('cancel-goal-btn').addEventListener('click', () => goalModal.classList.remove('open'));
-        goalForm.addEventListener('submit', (e) => {
+        // Mobile Menu
+        const menuBtn = document.getElementById('menu-btn');
+        const closeBtn = document.getElementById('close-btn');
+        const mobileNavLinks = document.getElementById('mobile-nav-links');
+        
+        // Clone links for mobile
+        if(mobileNavLinks.children.length === 0) {
+            document.querySelectorAll('#main-nav-links li').forEach(li => {
+                const clone = li.cloneNode(true);
+                clone.querySelector('a').addEventListener('click', (e) => {
+                   e.preventDefault();
+                   const target = clone.querySelector('a').getAttribute('href').substring(1);
+                   handleNav(target);
+                });
+                mobileNavLinks.appendChild(clone);
+            });
+        }
+
+        menuBtn.addEventListener('click', () => mobileMenu.classList.remove('-translate-x-full'));
+        closeBtn.addEventListener('click', () => mobileMenu.classList.add('-translate-x-full'));
+
+        // Calendar Nav
+        document.getElementById('prev-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });
+        document.getElementById('next-month').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
+        document.getElementById('calendar-modal-close').addEventListener('click', () => calendarModal.classList.remove('open'));
+
+        // Assessment Modal
+        document.getElementById('add-assessment-btn').addEventListener('click', () => assessmentModal.classList.add('open'));
+        document.getElementById('cancel-assessment-btn').addEventListener('click', () => assessmentModal.classList.remove('open'));
+        document.getElementById('assessment-form').addEventListener('submit', (e) => {
             e.preventDefault();
-            const index = parseInt(goalForm['goal-index'].value);
-            const newText = goalForm['goal-text'].value.trim();
+            const title = document.getElementById('title').value;
+            const date = document.getElementById('deadline-date').value;
+            const time = document.getElementById('deadline-time').value;
+            window.addUserAssessmentDB(title, `${date}T${time}:00`);
+            assessmentModal.classList.remove('open');
+            e.target.reset();
+        });
+
+        // Milestones
+        document.getElementById('add-milestone-btn').addEventListener('click', () => {
+             document.getElementById('milestone-modal-title').innerText = "Add Milestone";
+             document.getElementById('milestone-form').reset();
+             milestoneModal.classList.add('open');
+        });
+        document.getElementById('cancel-milestone-btn').addEventListener('click', () => milestoneModal.classList.remove('open'));
+        document.getElementById('milestone-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const title = document.getElementById('milestone-title').value;
+            const date = document.getElementById('milestone-date').value;
+            window.addMilestoneDB(title, date);
+            milestoneModal.classList.remove('open');
+        });
+
+        // Goals
+        document.getElementById('add-goal-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = document.getElementById('new-goal-input');
+            if(input.value.trim()) {
+                window.addGoalDB(input.value.trim());
+                input.value = '';
+            }
+        });
+        document.getElementById('cancel-goal-btn').addEventListener('click', () => goalModal.classList.remove('open'));
+        document.getElementById('goal-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const id = document.getElementById('goal-id').value;
+            const newText = document.getElementById('goal-text').value.trim();
             if (newText) {
-                let goals = JSON.parse(localStorage.getItem('goals')) || [];
-                if (goals[index]) {
-                    goals[index].text = newText;
-                    localStorage.setItem('goals', JSON.stringify(goals));
-                    renderGoals();
-                }
+                window.updateGoalDB(id, newText);
             }
             goalModal.classList.remove('open');
         });
+
+        // --- FOCUS STUDY LOGIC ---
+        const focusForm = document.getElementById('focus-form');
+        const focusTimeline = document.getElementById('focus-timeline');
+        const activeTimerCard = document.getElementById('active-timer-card');
+        const focusConfigCard = document.getElementById('focus-config-card');
+        const mainTimerDisplay = document.getElementById('main-timer-display');
+        const timerStatus = document.getElementById('timer-status');
+        const timerLabel = document.getElementById('timer-label');
+        const timerToggleBtn = document.getElementById('timer-toggle-btn');
+        const timerStopBtn = document.getElementById('timer-stop-btn');
+        const sessionEndPreview = document.getElementById('session-end-preview');
         
-        // --- Obtainables Page ---
-        const obtainableList = document.getElementById('obtainable-list');
-        const addObtainableForm = document.getElementById('add-obtainable-form');
-        const obtainableModal = document.getElementById('obtainable-modal');
-        const obtainableForm = document.getElementById('obtainable-form');
+        // Notification elements
+        const notificationModal = document.getElementById('notification-modal');
+        const notificationTitle = document.getElementById('notification-title');
+        const notificationMessage = document.getElementById('notification-message');
+        const notificationIcon = document.getElementById('notification-icon');
+        const notificationIconContainer = document.getElementById('notification-icon-container');
+        const notificationCard = document.getElementById('notification-card');
+        const notificationDismissBtn = document.getElementById('notification-dismiss-btn');
 
-        function openObtainableModalForEdit(index) {
-            let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [];
-            const obtainable = obtainables[index];
-            if (!obtainable) return;
+        // Mini Timer elements
+        const miniTimer = document.getElementById('mini-timer');
+        const miniTimerText = document.getElementById('mini-timer-text');
+        const miniTimerLabel = document.getElementById('mini-timer-label');
 
-            obtainableForm['obtainable-index'].value = index;
-            obtainableForm['obtainable-text'].value = obtainable.text;
-            obtainableModal.classList.add('open');
+        let focusInterval;
+        let currentSessionPlan = [];
+        let currentBlockIndex = 0;
+        let secondsRemaining = 0;
+        let isTimerRunning = false;
+        let audioContext = null;
+
+        // Beep sound generator - Init audio context on interaction if needed
+        function playNotificationSound(type) {
+            if (!audioContext) {
+                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            if (audioContext.state === 'suspended') {
+                 // Try to resume, but it might fail without user gesture. 
+                 // We will also ensure resume is called on button clicks.
+                 audioContext.resume();
+            }
+
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            if (type === 'break') {
+                // Happy high pitch for break
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5
+                oscillator.frequency.exponentialRampToValueAtTime(1046.5, audioContext.currentTime + 0.1); // C6
+            } else {
+                // Focus sound
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // A4
+            }
+
+            gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.5);
+        }
+        
+        // Helper to ensure audio is ready
+        function ensureAudioContext() {
+             if (!audioContext) {
+                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+             }
+             if (audioContext.state === 'suspended') {
+                 audioContext.resume();
+             }
         }
 
-        function deleteObtainable(index) {
-            let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [];
-            obtainables.splice(index, 1);
-            localStorage.setItem('obtainables', JSON.stringify(obtainables));
-            renderObtainables();
+        focusForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            ensureAudioContext(); // Initialize audio on user interaction
+            const durationMins = parseInt(document.getElementById('focus-duration').value);
+            const strategy = document.getElementById('focus-strategy').value;
+            const [focusTime, breakTime] = strategy.split('-').map(Number);
+            
+            generateFocusSchedule(durationMins, focusTime, breakTime);
+            startSession();
+        });
+
+        function generateFocusSchedule(totalMins, focusDuration, breakDuration) {
+            currentSessionPlan = [];
+            let currentTime = new Date();
+            // Round to next minute for cleanliness
+            currentTime.setSeconds(0, 0);
+            currentTime.setMinutes(currentTime.getMinutes() + 1);
+
+            let remainingMins = totalMins;
+            let isFocus = true;
+
+            while (remainingMins > 0) {
+                let blockDuration = isFocus ? focusDuration : breakDuration;
+                
+                // Don't end on a break if it exceeds time significantly
+                if (remainingMins < blockDuration) {
+                    blockDuration = remainingMins;
+                }
+
+                const endTime = new Date(currentTime.getTime() + blockDuration * 60000);
+                
+                currentSessionPlan.push({
+                    type: isFocus ? 'Focus' : 'Break',
+                    start: new Date(currentTime),
+                    end: endTime,
+                    duration: blockDuration,
+                    status: 'pending' // pending, active, completed
+                });
+
+                currentTime = endTime;
+                remainingMins -= blockDuration;
+                isFocus = !isFocus; // Toggle
+            }
+            
+            // Render Timeline
+            renderTimeline();
+            sessionEndPreview.textContent = `Ends at ${currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
         }
 
-        const renderObtainables = () => {
-             if (!obtainableList) return;
-             let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [
-                { text: "Obtain all lecture notes for IoT", completed: false },
-                { text: "Download assessment brief for Machine Learning", completed: false },
-                { text: "Review seminar notes for Web Innovations", completed: false },
-             ];
-             localStorage.setItem('obtainables', JSON.stringify(obtainables));
-             obtainableList.innerHTML = '';
-             
-             obtainables.forEach((item, index) => {
-                const obtainableItem = document.createElement('div');
-                obtainableItem.className = 'obtainable-item list-item futuristic-card p-4 rounded-lg flex items-center gap-4';
-                obtainableItem.innerHTML = `
-                    <input type="checkbox" class="custom-checkbox" data-index="${index}" ${item.completed ? 'checked' : ''}>
-                    <p class="list-item-content text-lg flex-grow ${item.completed ? 'completed' : ''}">${item.text}</p>
-                    <div class="action-buttons flex gap-2">
-                         <button class="edit-obtainable-btn p-1.5 rounded-md hover:bg-gray-600" data-index="${index}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
-                        <button class="delete-obtainable-btn p-1.5 rounded-md hover:bg-gray-600" data-index="${index}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
+        function renderTimeline() {
+            focusTimeline.innerHTML = '';
+            currentSessionPlan.forEach((block, index) => {
+                const isFocus = block.type === 'Focus';
+                const div = document.createElement('div');
+                div.className = `relative pl-8 pb-8 last:pb-0 timeline-block ${block.status}`;
+                
+                // Color logic
+                let colorClass = isFocus ? 'bg-sky-500' : 'bg-green-500';
+                if (block.status === 'pending') colorClass = 'bg-gray-600';
+                if (block.status === 'active') colorClass = isFocus ? 'bg-sky-400 animate-pulse' : 'bg-green-400 animate-pulse';
+
+                div.innerHTML = `
+                    <span class="absolute left-[-9px] top-0 flex items-center justify-center w-5 h-5 rounded-full ${colorClass} ring-4 ring-gray-900">
+                        ${block.status === 'completed' ? '<svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>' : ''}
+                    </span>
+                    <div class="futuristic-card p-4 rounded-lg border-l-4 ${isFocus ? 'border-sky-500' : 'border-green-500'} ${block.status === 'active' ? 'ring-1 ring-white/20 bg-gray-800' : ''} transition-all">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="font-bold text-lg ${isFocus ? 'text-sky-400' : 'text-green-400'}">${block.type}</span>
+                            <span class="text-xs font-mono bg-gray-900 px-2 py-1 rounded text-gray-400">${block.duration} min</span>
+                        </div>
+                        <div class="text-sm text-gray-300">
+                            ${block.start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${block.end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </div>
                     </div>
                 `;
-                obtainableList.appendChild(obtainableItem);
-                setTimeout(() => obtainableItem.classList.add('visible'), index * 100);
-             });
-
-             document.querySelectorAll('#obtainable-list .custom-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', (e) => {
-                    let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [];
-                    const index = parseInt(e.target.dataset.index);
-                    obtainables[index].completed = e.target.checked;
-                    localStorage.setItem('obtainables', JSON.stringify(obtainables));
-                    renderObtainables();
-                });
-             });
-             document.querySelectorAll('#obtainable-list .edit-obtainable-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => openObtainableModalForEdit(parseInt(e.currentTarget.dataset.index)));
-             });
-             document.querySelectorAll('#obtainable-list .delete-obtainable-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => deleteObtainable(parseInt(e.currentTarget.dataset.index)));
-             });
+                focusTimeline.appendChild(div);
+            });
         }
+
+        function startSession() {
+            activeTimerCard.classList.remove('hidden');
+            currentBlockIndex = 0;
+            processBlockStart();
+            isTimerRunning = true;
+            updateTimerControls();
+            
+            if (focusInterval) clearInterval(focusInterval);
+            focusInterval = setInterval(timerTick, 1000);
+        }
+
+        function processBlockStart() {
+            if (currentBlockIndex >= currentSessionPlan.length) {
+                completeAll();
+                return;
+            }
+
+            // Update statuses
+            currentSessionPlan.forEach((b, i) => {
+                if (i < currentBlockIndex) b.status = 'completed';
+                else if (i === currentBlockIndex) b.status = 'active';
+                else b.status = 'pending';
+            });
+            renderTimeline();
+
+            const currentBlock = currentSessionPlan[currentBlockIndex];
+            secondsRemaining = currentBlock.duration * 60;
+            
+            // UI Updates
+            timerStatus.textContent = currentBlock.type;
+            timerStatus.className = `inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${currentBlock.type === 'Focus' ? 'bg-sky-900/50 text-sky-300' : 'bg-green-900/50 text-green-300'}`;
+            timerLabel.textContent = `Current: ${currentBlock.start.toLocaleTimeString([],{hour:'2-digit', minute:'2-digit'})} - ${currentBlock.end.toLocaleTimeString([],{hour:'2-digit', minute:'2-digit'})}`;
+            
+            updateTimerDisplay();
+            
+            // Show notification and play sound
+            showSessionNotification(currentBlock.type);
+            playNotificationSound(currentBlock.type === 'Focus' ? 'focus' : 'break');
+
+            // Update Mini Timer Style
+            miniTimer.classList.remove('hidden');
+            if (currentBlock.type === 'Focus') {
+                miniTimer.className = "fixed bottom-8 right-8 w-24 h-24 rounded-full flex flex-col items-center justify-center text-white font-bold shadow-[0_0_30px_rgba(14,165,233,0.5)] z-40 transition-all duration-300 hover:scale-110 cursor-pointer border-4 border-sky-300/30 bg-sky-600/90 backdrop-blur-md group";
+            } else {
+                miniTimer.className = "fixed bottom-8 right-8 w-24 h-24 rounded-full flex flex-col items-center justify-center text-white font-bold shadow-[0_0_30px_rgba(34,197,94,0.5)] z-40 transition-all duration-300 hover:scale-110 cursor-pointer border-4 border-green-300/30 bg-green-600/90 backdrop-blur-md group";
+            }
+            miniTimerLabel.textContent = currentBlock.type;
+        }
+
+        function showSessionNotification(type) {
+            notificationModal.classList.add('open');
+            ensureAudioContext(); // Ensure audio context is active when modal shows
+
+            if (type === 'Focus') {
+                notificationTitle.textContent = "Time to Focus";
+                notificationTitle.className = "text-4xl font-extrabold mb-4 tracking-tight text-sky-400";
+                
+                notificationMessage.textContent = "Eliminate distractions. Deep work starts now.";
+                
+                notificationIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="w-12 h-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>`;
+                notificationIconContainer.className = "w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 bg-sky-600 shadow-[0_0_30px_rgba(14,165,233,0.5)] animate-pulse-ring";
+                notificationCard.className = "modal-content futuristic-card p-10 rounded-3xl w-full max-w-lg text-center border-2 border-sky-500 shadow-[0_0_50px_rgba(14,165,233,0.2)]";
+                
+                notificationDismissBtn.className = "w-full py-4 px-6 rounded-xl font-bold text-lg transition-transform hover:scale-105 active:scale-95 shadow-lg bg-sky-600 hover:bg-sky-500 text-white";
+                
+            } else {
+                notificationTitle.textContent = "Take a Break";
+                notificationTitle.className = "text-4xl font-extrabold mb-4 tracking-tight text-green-400";
+                
+                notificationMessage.textContent = "Step away from the screen. Stretch, hydrate, relax.";
+                
+                notificationIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="w-12 h-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+                notificationIconContainer.className = "w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 bg-green-600 shadow-[0_0_30px_rgba(34,197,94,0.5)] animate-pulse-ring";
+                notificationCard.className = "modal-content futuristic-card p-10 rounded-3xl w-full max-w-lg text-center border-2 border-green-500 shadow-[0_0_50px_rgba(34,197,94,0.2)]";
+                
+                notificationDismissBtn.className = "w-full py-4 px-6 rounded-xl font-bold text-lg transition-transform hover:scale-105 active:scale-95 shadow-lg bg-green-600 hover:bg-green-500 text-white";
+            }
+        }
+
+        notificationDismissBtn.addEventListener('click', () => {
+            notificationModal.classList.remove('open');
+            ensureAudioContext();
+        });
         
-        addObtainableForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const input = document.getElementById('new-obtainable-input');
-            if (input.value.trim()) {
-                 let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [];
-                 obtainables.push({ text: input.value.trim(), completed: false });
-                 localStorage.setItem('obtainables', JSON.stringify(obtainables));
-                 renderObtainables();
-                 input.value = '';
+        // Mini Timer Click
+        miniTimer.addEventListener('click', () => {
+            handleNav('focus-study');
+        });
+
+        function timerTick() {
+            if (!isTimerRunning) return;
+
+            secondsRemaining--;
+            updateTimerDisplay();
+
+            if (secondsRemaining <= 0) {
+                currentBlockIndex++;
+                processBlockStart();
+            }
+        }
+
+        function updateTimerDisplay() {
+            const m = Math.floor(secondsRemaining / 60).toString().padStart(2, '0');
+            const s = (secondsRemaining % 60).toString().padStart(2, '0');
+            const timeString = `${m}:${s}`;
+            
+            mainTimerDisplay.textContent = timeString;
+            miniTimerText.textContent = timeString;
+            document.title = `${timeString} - ${timerStatus.textContent}`;
+        }
+
+        function completeAll() {
+            clearInterval(focusInterval);
+            isTimerRunning = false;
+            currentSessionPlan.forEach(b => b.status = 'completed');
+            renderTimeline();
+            timerStatus.textContent = "Finished";
+            timerLabel.textContent = "Great job! Session complete.";
+            mainTimerDisplay.textContent = "00:00";
+            miniTimer.classList.add('hidden'); // Hide mini timer
+            updateTimerControls();
+            document.title = "UniHub";
+            playNotificationSound('break'); // End sound
+        }
+
+        function updateTimerControls() {
+            timerToggleBtn.textContent = isTimerRunning ? 'Pause' : 'Resume';
+            timerToggleBtn.className = isTimerRunning 
+                ? 'bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-6 rounded-lg'
+                : 'bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-lg';
+        }
+
+        timerToggleBtn.addEventListener('click', () => {
+            isTimerRunning = !isTimerRunning;
+            updateTimerControls();
+        });
+
+        timerStopBtn.addEventListener('click', () => {
+            if(confirm("End current session?")) {
+                clearInterval(focusInterval);
+                activeTimerCard.classList.add('hidden');
+                miniTimer.classList.add('hidden'); // Hide mini timer
+                document.title = "UniHub";
+                focusTimeline.innerHTML = '<p class="text-gray-500 italic pl-4">Session stopped. Configure a new session to begin.</p>';
             }
         });
 
-        document.getElementById('cancel-obtainable-btn').addEventListener('click', () => obtainableModal.classList.remove('open'));
-        obtainableForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const index = parseInt(obtainableForm['obtainable-index'].value);
-            const newText = obtainableForm['obtainable-text'].value.trim();
-            if (newText) {
-                let obtainables = JSON.parse(localStorage.getItem('obtainables')) || [];
-                if (obtainables[index]) {
-                    obtainables[index].text = newText;
-                    localStorage.setItem('obtainables', JSON.stringify(obtainables));
-                    renderObtainables();
-                }
-            }
-            obtainableModal.classList.remove('open');
-        });
-
-
-        // Initial renders
-        generateFullSchedule();
+        // Initial renders - called explicitly to handle race condition if DB loads fast
         init3DBackground();
         renderSchedule();
-        setInterval(renderSchedule, 60000);
+        setInterval(renderSchedule, 60000); // Update schedule every minute
         renderCalendar();
         renderAssessments();
         renderMilestones();
         renderGoals();
-        renderObtainables();
         handleNav('home');
     });
     </script>
 </body>
 </html>
-
